@@ -1,0 +1,169 @@
+:root {
+  color: #ecf2ff;
+  background: #101522;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 960px;
+  min-height: 100vh;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #34415f;
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  color: #ecf2ff;
+  background: #1a2235;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:hover:not(:disabled) {
+  border-color: #6f8dff;
+  background: #22304a;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) 180px;
+  height: 100vh;
+  padding: 1rem;
+  gap: 1rem;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.04em;
+}
+
+.topbar p {
+  margin: 0.2rem 0 0;
+  color: #93a4c7;
+  font-size: 0.9rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  min-height: 0;
+  gap: 1rem;
+}
+
+.panel,
+.log-panel {
+  overflow: hidden;
+  border: 1px solid #26334d;
+  border-radius: 18px;
+  background: #141b2b;
+  box-shadow: 0 18px 60px rgb(0 0 0 / 20%);
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.panel-header,
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #26334d;
+  padding: 0.75rem 1rem;
+  color: #b9c7e6;
+  background: #182137;
+  font-weight: 700;
+}
+
+.preview-canvas {
+  display: grid;
+  overflow: auto;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    linear-gradient(45deg, rgb(255 255 255 / 4%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(255 255 255 / 4%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(255 255 255 / 4%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(255 255 255 / 4%) 75%);
+  background-position:
+    0 0,
+    0 12px,
+    12px -12px,
+    -12px 0;
+  background-size: 24px 24px;
+}
+
+.svg-output {
+  display: grid;
+  place-items: center;
+  min-width: 100%;
+}
+
+.svg-output svg {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: white;
+}
+
+.empty-state {
+  color: #93a4c7;
+}
+
+.log-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.log-header {
+  padding: 0.65rem 1rem;
+}
+
+.status-ok {
+  color: #72e0a4;
+}
+
+.status-error {
+  color: #ff8a8a;
+}
+
+.log-panel pre {
+  overflow: auto;
+  margin: 0;
+  padding: 1rem;
+  color: #d9e4ff;
+  font: 13px/1.5 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+}
