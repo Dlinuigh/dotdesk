@@ -4,6 +4,26 @@
 
 ---
 
+## [0002] 2026-05-06 — DOT 样式边栏与多选支持
+
+### 对话摘要
+第二回合对话，完成了以下工作：
+1. 新增 `DotStyleConfig`/`GraphStyle`/`NodeStyle`/`EdgeStyle` 类型定义 (`src/types.ts`)
+2. 新建 `DotStylePanel` 样式边栏组件，三个可折叠面板 (Graph/Node/Edge)
+3. 思维导图增加 Ctrl+Click 多选支持
+4. `MindMapNode` 增加可选 `style` 属性，支持节点独立样式
+5. `mindMapToDot` 修复颜色值引号包裹，支持节点级联样式输出
+6. 布局改为三列：Style 边栏 | MindMap | SVG Preview
+7. 移除三段模式切换，保留 Mind Map / DOT Editor 两段
+
+### 关键决策
+- Style 不再作为独立模式，而是固定在思维导图左侧的边栏
+- 没有选中节点时 Node 属性修改全局默认值，选中后修改选中节点
+- 使用 `<input type="color">` 原生控件实现色盘，无需第三方库
+- 颜色值在 DOT 输出中始终加引号包裹
+
+---
+
 ## [0001] 2026-05-06 — 项目初始化与导图功能开发
 
 ### 对话摘要

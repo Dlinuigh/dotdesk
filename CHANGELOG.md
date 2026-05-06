@@ -3,6 +3,13 @@
 ## [2026-05-06]
 
 ### 新增
+- DOT 样式面板：可视化定制 Graph/Node/Edge 属性
+- Style 固定边栏：在思维导图模式下始终显示在左侧
+- 多选支持：Ctrl+Click 选中多个节点，群组修改样式
+- 节点独立样式：每个 MindMapNode 支持独立的 style 属性
+- mindMapToDot 输出带引号的颜色值和节点级联样式
+- 属性分组折叠面板（Graph/Node/Edge 可折叠）
+- 提供"Reset"按钮恢复 DOT 原始默认值
 - 项目初始化：Tauri + React + TypeScript + Vite 模板
 - DOT 源码编辑（Monaco Editor）
 - Graphviz SVG 渲染（`dot -Tsvg`）

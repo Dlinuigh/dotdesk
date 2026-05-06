@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MindMapNode } from '../types';
+import type { DotStyleConfig, MindMapNode, NodeStyle } from '../types';
 
 let _idCounter = 0;
 function genId(): string {
@@ -10,18 +10,69 @@ function createNode(label = 'New Node'): MindMapNode {
   return { id: genId(), label, children: [] };
 }
 
+/** 将样式对象转为 DOT 属性字符串 */
+function styleToAttr(obj: Record<string, unknown>): string {
+  return Object.entries(obj)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => {
+      const val = typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v);
+      // 颜色值（#开头）、含空格或特殊字符的值需要加引号
+      const needsQuote = /^#/.test(val) || /[ ,"']/.test(val);
+      return needsQuote ? `  ${k}="${val}"` : `  ${k}=${val}`;
+    })
+    .join(',\n');
+}
+
+/** 将单个节点的 style 转为内联属性字符串 */
+function nodeStyleToAttr(style: Partial<NodeStyle> | undefined): string {
+  if (!style) return '';
+  const entries = Object.entries(style).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  if (entries.length === 0) return '';
+  return entries
+    .map(([k, v]) => {
+      const val = String(v);
+      const needsQuote = /^#/.test(val) || /[ ,"']/.test(val);
+      return `${k}="${val}"`;
+    })
+    .join(', ');
+}
+
 /** 从节点树生成 DOT 源码 */
-export function mindMapToDot(root: MindMapNode): string {
+export function mindMapToDot(root: MindMapNode, style?: DotStyleConfig): string {
   const lines: string[] = [];
   lines.push('digraph mindmap {');
-  lines.push('  rankdir=LR;');
-  lines.push('  node [shape=box, style="rounded,filled", fillcolor="#eef4ff", color="#5b7cfa", fontname="Inter"];');
-  lines.push('  edge [color="#5b7cfa", arrowhead="vee"];');
+
+  // graph attributes
+  if (style?.graph) {
+    const g = styleToAttr(style.graph as Record<string, unknown>);
+    if (g) {
+      lines.push(`graph [\n${g}\n];`);
+    }
+  }
+
+  // node default attributes
+  if (style?.node) {
+    const n = styleToAttr(style.node as Record<string, unknown>);
+    if (n) {
+      lines.push(`node [\n${n}\n];`);
+    }
+  }
+
+  // edge default attributes
+  if (style?.edge) {
+    const e = styleToAttr(style.edge as Record<string, unknown>);
+    if (e) {
+      lines.push(`edge [\n${e}\n];`);
+    }
+  }
+
   lines.push('');
 
   function walk(node: MindMapNode) {
     const escaped = node.label.replace(/"/g, '\\"');
-    lines.push(`  "${node.id}" [label="${escaped}"];`);
+    const styleAttr = nodeStyleToAttr(node.style);
+    const suffix = styleAttr ? `, ${styleAttr}` : '';
+    lines.push(`  "${node.id}" [label="${escaped}"${suffix}];`);
     for (const child of node.children) {
       lines.push(`  "${node.id}" -> "${child.id}";`);
       walk(child);
@@ -77,22 +128,30 @@ type MindMapProps = {
   root: MindMapNode;
   onChange: (root: MindMapNode) => void;
   onDotChange: (dot: string) => void;
+  onSelectionChange?: (ids: string[]) => void;
+  style?: DotStyleConfig;
 };
 
-export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
-  const [selectedId, setSelectedId] = useState(root.id);
+export function MindMap({ root, onChange, onDotChange, onSelectionChange, style }: MindMapProps) {
+  const [activeId, setActiveId] = useState(root.id);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set([root.id]));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // 通知外部选中变化
+  useEffect(() => {
+    onSelectionChange?.(Array.from(selectedIds));
+  }, [selectedIds, onSelectionChange]);
+
   // 通知外部 DOT 变更
   const notifyDot = useCallback(
     (node: MindMapNode) => {
-      onDotChange(mindMapToDot(node));
+      onDotChange(mindMapToDot(node, style));
     },
-    [onDotChange],
+    [onDotChange, style],
   );
 
   // 更新树（不可变）
@@ -115,89 +174,133 @@ export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
 
   // 选中节点滚动到视图中
   useEffect(() => {
-    const el = nodeRefs.current.get(selectedId);
+    const el = nodeRefs.current.get(activeId);
     if (el && containerRef.current) {
       el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [selectedId]);
+  }, [activeId]);
 
-  // 确保选中节点始终存在
+  // 确保 activeId 始终存在
   useEffect(() => {
-    if (!findNode(root, selectedId)) {
-      setSelectedId(root.id);
+    if (!findNode(root, activeId)) {
+      setActiveId(root.id);
+      setSelectedIds(new Set([root.id]));
     }
-  }, [root, selectedId]);
+  }, [root, activeId]);
+
+  /* ── 选择操作 ── */
+
+  const handleNodeClick = useCallback(
+    (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setActiveId(id);
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+Click: 切换选中
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) {
+            if (next.size > 1) next.delete(id); // 保留至少一个选中
+          } else {
+            next.add(id);
+          }
+          return next;
+        });
+      } else {
+        // 普通点击：单选
+        setSelectedIds(new Set([id]));
+      }
+    },
+    [],
+  );
 
   /* ── 导航 ── */
 
   const selectNext = useCallback(() => {
     const flat = getFlatNodes(root);
-    const idx = flat.findIndex((n) => n.id === selectedId);
-    if (idx < flat.length - 1) setSelectedId(flat[idx + 1].id);
-  }, [root, selectedId]);
+    const idx = flat.findIndex((n) => n.id === activeId);
+    if (idx < flat.length - 1) {
+      const nextId = flat[idx + 1].id;
+      setActiveId(nextId);
+      setSelectedIds(new Set([nextId]));
+    }
+  }, [root, activeId]);
 
   const selectPrev = useCallback(() => {
     const flat = getFlatNodes(root);
-    const idx = flat.findIndex((n) => n.id === selectedId);
-    if (idx > 0) setSelectedId(flat[idx - 1].id);
-  }, [root, selectedId]);
+    const idx = flat.findIndex((n) => n.id === activeId);
+    if (idx > 0) {
+      const prevId = flat[idx - 1].id;
+      setActiveId(prevId);
+      setSelectedIds(new Set([prevId]));
+    }
+  }, [root, activeId]);
 
   const selectFirstChild = useCallback(() => {
-    const target = findNode(root, selectedId);
+    const target = findNode(root, activeId);
     if (target && target.children.length > 0) {
-      setSelectedId(target.children[0].id);
+      const childId = target.children[0].id;
+      setActiveId(childId);
+      setSelectedIds(new Set([childId]));
     }
-  }, [root, selectedId]);
+  }, [root, activeId]);
 
   const selectParent = useCallback(() => {
-    const parent = findParent(root, selectedId);
-    if (parent) setSelectedId(parent.id);
-  }, [root, selectedId]);
+    const parent = findParent(root, activeId);
+    if (parent) {
+      setActiveId(parent.id);
+      setSelectedIds(new Set([parent.id]));
+    }
+  }, [root, activeId]);
 
   /* ── 操作 ── */
 
   const addChild = useCallback(() => {
     updateTree((node) => {
-      const target = findNode(node, selectedId);
+      const target = findNode(node, activeId);
       if (target) {
         const child = createNode();
         target.children.push(child);
-        setSelectedId(child.id);
+        setActiveId(child.id);
+        setSelectedIds(new Set([child.id]));
       }
       return node;
     });
-  }, [selectedId, updateTree]);
+  }, [activeId, updateTree]);
 
   const addSibling = useCallback(() => {
-    if (selectedId === root.id) {
+    if (activeId === root.id) {
       addChild();
       return;
     }
     updateTree((node) => {
-      const parent = findParent(node, selectedId);
+      const parent = findParent(node, activeId);
       if (parent) {
         const sibling = createNode();
-        const idx = parent.children.findIndex((c) => c.id === selectedId);
+        const idx = parent.children.findIndex((c) => c.id === activeId);
         parent.children.splice(idx + 1, 0, sibling);
-        setSelectedId(sibling.id);
+        setActiveId(sibling.id);
+        setSelectedIds(new Set([sibling.id]));
       }
       return node;
     });
-  }, [root.id, selectedId, addChild, updateTree]);
+  }, [root.id, activeId, addChild, updateTree]);
 
   const deleteNode = useCallback(() => {
-    if (selectedId === root.id) return;
+    if (activeId === root.id) return;
     updateTree((node) => {
-      const parent = findParent(node, selectedId);
+      const parent = findParent(node, activeId);
       if (parent) {
-        const idx = parent.children.findIndex((c) => c.id === selectedId);
+        const idx = parent.children.findIndex((c) => c.id === activeId);
         const prev = idx > 0 ? parent.children[idx - 1] : null;
         parent.children.splice(idx, 1);
-        setSelectedId(prev ? prev.id : parent.id);
+        // 删除后选中父节点或前一个兄弟
+        const nextId = prev ? prev.id : parent.id;
+        setActiveId(nextId);
+        setSelectedIds(new Set([nextId]));
       }
       return node;
     });
-  }, [root.id, selectedId, updateTree]);
+  }, [root.id, activeId, updateTree]);
 
   const startEdit = useCallback((id: string, label: string) => {
     setEditingId(id);
@@ -213,7 +316,6 @@ export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
       return node;
     });
     setEditingId(null);
-    // 退出编辑后把焦点还给容器，让方向键等键盘事件可用
     containerRef.current?.focus();
   }, [editingId, editValue, updateTree]);
 
@@ -263,22 +365,23 @@ export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
         case ' ':
           e.preventDefault();
           {
-            const node = findNode(root, selectedId);
+            const node = findNode(root, activeId);
             if (node) startEdit(node.id, node.label);
           }
           break;
       }
     },
-    [editingId, addChild, addSibling, deleteNode, commitEdit, selectNext, selectPrev, selectFirstChild, selectParent, root, selectedId, startEdit],
+    [editingId, addChild, addSibling, deleteNode, commitEdit, selectNext, selectPrev, selectFirstChild, selectParent, root, activeId, startEdit],
   );
 
   /* ── 渲染节点树 ── */
 
   function renderNode(node: MindMapNode, depth: number): React.ReactNode {
-    const isSelected = node.id === selectedId;
+    const isSelected = selectedIds.has(node.id);
+    const isActive = node.id === activeId;
     const isEditing = node.id === editingId;
 
-    const dotColor = isSelected ? '#ff6b6b' : '#5b7cfa';
+    const dotColor = isActive && isSelected ? '#ff6b6b' : '#5b7cfa';
 
     return (
       <div key={node.id} style={{ marginLeft: depth > 0 ? 28 : 0 }}>
@@ -287,7 +390,7 @@ export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
             if (el) nodeRefs.current.set(node.id, el);
             else nodeRefs.current.delete(node.id);
           }}
-          className={`mm-node${isSelected ? ' mm-node--selected' : ''}`}
+          className={`mm-node${isSelected ? ' mm-node--selected' : ''}${isActive ? ' mm-node--active' : ''}`}
           style={{
             border: `2px solid ${dotColor}`,
             borderRadius: 10,
@@ -298,8 +401,10 @@ export function MindMap({ root, onChange, onDotChange }: MindMapProps) {
             transition: 'border-color 0.15s, background 0.15s',
             display: 'inline-block',
             minWidth: 80,
+            outline: isSelected ? '1px solid #6f8dff88' : undefined,
           }}
-          onClick={() => setSelectedId(node.id)}
+          onClick={(e) => handleNodeClick(e, node.id)}
+          onDoubleClick={() => startEdit(node.id, node.label)}
         >
           {isEditing ? (
             <input

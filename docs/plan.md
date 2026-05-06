@@ -35,6 +35,16 @@
 - [x] `docs/plan.md`
 - [x] `.github/skills/dotdesk-dev/SKILL.md`
 
+## 阶段四：DOT 样式边栏
+
+- [x] `DotStyleConfig` 类型定义（Graph/Node/Edge）
+- [x] `DotStylePanel` 边栏组件：折叠分组 + 完整属性控件
+- [x] 固定边栏布局（三列 workspace）
+- [x] `mindMapToDot` 支持全局样式 + 节点级联样式
+- [x] Ctrl+Click 多选节点，批量应用样式
+- [x] MindMapNode 添加可选 style 属性
+- [x] 表单控件 Dark 主题样式 + 颜色值引号包裹
+
 ## 后续方向（待定）
 
 - [ ] 拖拽调整节点层级

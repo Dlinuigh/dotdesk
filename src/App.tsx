@@ -4,10 +4,12 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { Download, FileDown, FileInput, GitBranch, Save, Wand2 } from 'lucide-react';
 import { DotEditor } from './components/DotEditor';
+import { DotStylePanel } from './components/DotStylePanel';
 import { MindMap, mindMapToDot } from './components/MindMap';
 import { RenderLog } from './components/RenderLog';
 import { SvgPreview } from './components/SvgPreview';
-import type { GraphvizStatus, MindMapNode, RenderResult } from './types';
+import type { DotStyleConfig, GraphvizStatus, MindMapNode, NodeStyle, RenderResult } from './types';
+import { DEFAULT_DOT_STYLE } from './types';
 
 const DEFAULT_MINDMAP: MindMapNode = {
   id: 'root',
@@ -36,15 +38,28 @@ const DEFAULT_MINDMAP: MindMapNode = {
   ],
 };
 
+/** 深度优先遍历所有节点 */
+function flatNodes(root: MindMapNode): MindMapNode[] {
+  const result: MindMapNode[] = [];
+  function walk(n: MindMapNode) {
+    result.push(n);
+    for (const c of n.children) walk(c);
+  }
+  walk(root);
+  return result;
+}
+
 function App() {
   const [mindMapRoot, setMindMapRoot] = useState<MindMapNode>(DEFAULT_MINDMAP);
-  const [dotSource, setDotSource] = useState(() => mindMapToDot(DEFAULT_MINDMAP));
+  const [dotSource, setDotSource] = useState(() => mindMapToDot(DEFAULT_MINDMAP, DEFAULT_DOT_STYLE));
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [svg, setSvg] = useState('');
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
   const [graphvizStatus, setGraphvizStatus] = useState<GraphvizStatus | null>(null);
   const [isRendering, setIsRendering] = useState(false);
-  const [mindMapMode, setMindMapMode] = useState(true);
+  const [mode, setMode] = useState<'mindmap' | 'editor'>('mindmap');
+  const [dotStyle, setDotStyle] = useState<DotStyleConfig>(DEFAULT_DOT_STYLE);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
   const fileLabel = useMemo(() => currentPath ?? 'Untitled graph.dot', [currentPath]);
 
@@ -83,7 +98,15 @@ function App() {
         renderDot();
       }
     });
-  }, []); // only run once on mount
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // dotStyle 变更时重新生成 DOT 并渲染（仅在 mindmap 模式下）
+  useEffect(() => {
+    if (mode !== 'mindmap') return;
+    const dot = mindMapToDot(mindMapRoot, dotStyle);
+    setDotSource(dot);
+    renderDot(dot);
+  }, [dotStyle, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 导图变更时自动渲染
   const handleMindMapChange = useCallback((newRoot: MindMapNode) => {
@@ -94,6 +117,40 @@ function App() {
     setDotSource(dot);
     renderDot(dot);
   }, [renderDot]);
+
+  // 选中节点样式变更：将 partial style 应用到所有选中的节点
+  const applyNodeStyle = useCallback(
+    (partial: Partial<NodeStyle>) => {
+      if (selectedNodeIds.length === 0) return;
+      const cloned = structuredClone(mindMapRoot);
+      const all = flatNodes(cloned);
+      for (const n of all) {
+        if (selectedNodeIds.includes(n.id)) {
+          n.style = { ...(n.style || {}), ...partial };
+        }
+      }
+      setMindMapRoot(cloned);
+      const dot = mindMapToDot(cloned, dotStyle);
+      setDotSource(dot);
+      renderDot(dot);
+    },
+    [selectedNodeIds, mindMapRoot, dotStyle, renderDot],
+  );
+
+  // 获取选中节点的合并样式（用于边栏展示）
+  const selectedNodeStyle = useMemo((): Partial<NodeStyle> | undefined => {
+    if (selectedNodeIds.length === 0) return undefined;
+    const all = flatNodes(mindMapRoot);
+    const selectedNodes = all.filter((n) => selectedNodeIds.includes(n.id));
+    if (selectedNodes.length === 0) return undefined;
+    // 合并：取最后一个选中节点的样式（如果多个节点样式不同，展示第一个有样式的）
+    for (const n of selectedNodes) {
+      if (n.style && Object.keys(n.style).length > 0) {
+        return n.style;
+      }
+    }
+    return undefined;
+  }, [selectedNodeIds, mindMapRoot]);
 
   async function openDotFile() {
     const selected = await open({
@@ -108,7 +165,7 @@ function App() {
     const contents = await readTextFile(selected);
     setCurrentPath(selected);
     setDotSource(contents);
-    setMindMapMode(false);
+    setMode('editor');
   }
 
   async function saveDotFile() {
@@ -148,13 +205,22 @@ function App() {
           <p>{fileLabel}</p>
         </div>
         <div className="toolbar">
-          <button
-            type="button"
-            onClick={() => setMindMapMode((m) => !m)}
-            style={{ borderColor: mindMapMode ? '#6f8dff' : undefined }}
-          >
-            <GitBranch size={16} /> {mindMapMode ? 'Mind Map' : 'DOT Editor'}
-          </button>
+          <div className="mode-tabs">
+            <button
+              type="button"
+              className={`mode-tab${mode === 'mindmap' ? ' mode-tab--active' : ''}`}
+              onClick={() => setMode('mindmap')}
+            >
+              <GitBranch size={16} /> Mind Map
+            </button>
+            <button
+              type="button"
+              className={`mode-tab${mode === 'editor' ? ' mode-tab--active' : ''}`}
+              onClick={() => setMode('editor')}
+            >
+              <FileInput size={16} /> DOT Editor
+            </button>
+          </div>
           <button type="button" onClick={openDotFile}>
             <FileInput size={16} /> Open
           </button>
@@ -173,13 +239,24 @@ function App() {
         </div>
       </header>
 
-      <section className="workspace">
-        {mindMapMode ? (
-          <MindMap
-            root={mindMapRoot}
-            onChange={handleMindMapChange}
-            onDotChange={handleDotFromMindMap}
-          />
+      <section className={`workspace ${mode === 'mindmap' ? 'workspace--with-sidebar' : ''}`}>
+        {mode === 'mindmap' ? (
+          <>
+            <DotStylePanel
+              globalStyle={dotStyle}
+              selectedNodeStyle={selectedNodeStyle}
+              selectedCount={selectedNodeIds.length}
+              onChangeGlobal={setDotStyle}
+              onChangeSelected={applyNodeStyle}
+            />
+            <MindMap
+              root={mindMapRoot}
+              onChange={handleMindMapChange}
+              onDotChange={handleDotFromMindMap}
+              onSelectionChange={setSelectedNodeIds}
+              style={dotStyle}
+            />
+          </>
         ) : (
           <DotEditor value={dotSource} onChange={setDotSource} />
         )}

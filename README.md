@@ -19,8 +19,9 @@
 - ✅ DOT 文件打开/保存
 - ✅ SVG 导出
 - ✅ Graphviz 环境检测与错误日志
-- ✅ 思维导图模式（键盘导航创建节点）
+- ✅ 思维导图模式（键盘导航创建节点 + 多选）
 - ✅ 导图导出为 DOT / SVG
+- ✅ DOT 样式边栏（可视化配置 Graph/Node/Edge 属性，Ctrl+Click 多选节点批量修改）
 
 ## 快速开始
 
@@ -66,10 +67,20 @@ npm run tauri:build
 ### 导图模式
 
 按下 **Tab** 创建子节点，**Enter** 创建兄弟节点，双击节点内容进行编辑，**Delete** 删除节点。
+**Ctrl+Click** 多选节点，选中的节点可以在左侧 Style 边栏中批量修改样式。
 
 ### 传统 DOT 编辑
 
 也可以在 Monaco 编辑器中直接编辑 DOT 源码，点击 Render 渲染预览。
+
+### 样式边栏
+
+在思维导图模式下，左侧 **Style** 边栏始终可用。包含三个折叠面板：
+- **Graph** — 布局方向、引擎、间距、背景色等全局属性
+- **Node** — 节点形状、填充色、边框色、字体、尺寸
+- **Edge** — 箭头样式、线型、颜色、粗细
+
+未选中节点时修改 Node 属性 = 修改全局默认值；选中一个或多个节点后修改 Node 属性 = 应用到所选节点。
 
 ## 项目结构
 
@@ -80,7 +91,9 @@ dotdesk/
 │   ├── types.ts            # TypeScript 类型定义
 │   ├── components/         # React 组件
 │   │   ├── DotEditor.tsx   # DOT 编辑器 (Monaco)
-│   │   ├── SvgPreview.tsx  # SVG 预览
+│   │   ├── DotStylePanel.tsx # DOT 样式边栏
+│   │   ├── MindMap.tsx     # 思维导图（支持多选）
+│   │   ├── RenderLog.tsx   # 渲染日志
 │   │   └── RenderLog.tsx   # 渲染日志
 │   └── styles.css          # 全局样式
 ├── src-tauri/              # Rust 后端源码
