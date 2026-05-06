@@ -8,7 +8,15 @@ import { DotStylePanel } from './components/DotStylePanel';
 import { MindMap, mindMapToDot } from './components/MindMap';
 import { RenderLog } from './components/RenderLog';
 import { SvgPreview } from './components/SvgPreview';
-import type { DotStyleConfig, GraphvizStatus, MindMapNode, NodeStyle, RenderResult } from './types';
+import type {
+  DotStyleConfig,
+  EdgeStyle,
+  EdgeStyleMap,
+  GraphvizStatus,
+  MindMapNode,
+  NodeStyle,
+  RenderResult,
+} from './types';
 import { DEFAULT_DOT_STYLE } from './types';
 
 const DEFAULT_MINDMAP: MindMapNode = {
@@ -26,15 +34,9 @@ const DEFAULT_MINDMAP: MindMapNode = {
     {
       id: 'c2',
       label: 'Topic 2',
-      children: [
-        { id: 'c2a', label: 'Subtopic 2.1', children: [] },
-      ],
+      children: [{ id: 'c2a', label: 'Subtopic 2.1', children: [] }],
     },
-    {
-      id: 'c3',
-      label: 'Topic 3',
-      children: [],
-    },
+    { id: 'c3', label: 'Topic 3', children: [] },
   ],
 };
 
@@ -51,7 +53,10 @@ function flatNodes(root: MindMapNode): MindMapNode[] {
 
 function App() {
   const [mindMapRoot, setMindMapRoot] = useState<MindMapNode>(DEFAULT_MINDMAP);
-  const [dotSource, setDotSource] = useState(() => mindMapToDot(DEFAULT_MINDMAP, DEFAULT_DOT_STYLE));
+  const [edgeStyles, setEdgeStyles] = useState<EdgeStyleMap>({});
+  const [dotSource, setDotSource] = useState(() =>
+    mindMapToDot(DEFAULT_MINDMAP, DEFAULT_DOT_STYLE, {}),
+  );
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [svg, setSvg] = useState('');
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
@@ -60,6 +65,7 @@ function App() {
   const [mode, setMode] = useState<'mindmap' | 'editor'>('mindmap');
   const [dotStyle, setDotStyle] = useState<DotStyleConfig>(DEFAULT_DOT_STYLE);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
   const fileLabel = useMemo(() => currentPath ?? 'Untitled graph.dot', [currentPath]);
 
@@ -69,28 +75,31 @@ function App() {
     return status;
   }, []);
 
-  const renderDot = useCallback(async (source?: string) => {
-    setIsRendering(true);
-    const src = source ?? dotSource;
-    try {
-      const result = await invoke<RenderResult>('render_dot_to_svg', { source: src });
-      setRenderResult(result);
-      setSvg(result.svg ?? '');
-      return result;
-    } catch (error) {
-      const failedResult = {
-        ok: false,
-        svg: null,
-        stdout: '',
-        stderr: error instanceof Error ? error.message : String(error),
-      };
-      setRenderResult(failedResult);
-      setSvg('');
-      return failedResult;
-    } finally {
-      setIsRendering(false);
-    }
-  }, [dotSource]);
+  const renderDot = useCallback(
+    async (source?: string) => {
+      setIsRendering(true);
+      const src = source ?? dotSource;
+      try {
+        const result = await invoke<RenderResult>('render_dot_to_svg', { source: src });
+        setRenderResult(result);
+        setSvg(result.svg ?? '');
+        return result;
+      } catch (error) {
+        const failedResult = {
+          ok: false,
+          svg: null,
+          stdout: '',
+          stderr: error instanceof Error ? error.message : String(error),
+        };
+        setRenderResult(failedResult);
+        setSvg('');
+        return failedResult;
+      } finally {
+        setIsRendering(false);
+      }
+    },
+    [dotSource],
+  );
 
   useEffect(() => {
     checkGraphviz().then((status) => {
@@ -100,25 +109,32 @@ function App() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // dotStyle 变更时重新生成 DOT 并渲染（仅在 mindmap 模式下）
+  // dotStyle 变更时（mindmap 模式下）重新生成 DOT 并渲染
   useEffect(() => {
     if (mode !== 'mindmap') return;
-    const dot = mindMapToDot(mindMapRoot, dotStyle);
+    const dot = mindMapToDot(mindMapRoot, dotStyle, edgeStyles);
     setDotSource(dot);
     renderDot(dot);
   }, [dotStyle, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 导图变更时自动渲染
   const handleMindMapChange = useCallback((newRoot: MindMapNode) => {
     setMindMapRoot(newRoot);
   }, []);
 
-  const handleDotFromMindMap = useCallback((dot: string) => {
-    setDotSource(dot);
-    renderDot(dot);
-  }, [renderDot]);
+  const handleDotFromMindMap = useCallback(
+    (dot: string) => {
+      setDotSource(dot);
+      renderDot(dot);
+    },
+    [renderDot],
+  );
 
-  // 选中节点样式变更：将 partial style 应用到所有选中的节点
+  const handleSelectionChange = useCallback((nodeIds: string[], edgeIds: string[]) => {
+    setSelectedNodeIds(nodeIds);
+    setSelectedEdgeIds(edgeIds);
+  }, []);
+
+  // 应用样式到选中的节点
   const applyNodeStyle = useCallback(
     (partial: Partial<NodeStyle>) => {
       if (selectedNodeIds.length === 0) return;
@@ -130,27 +146,49 @@ function App() {
         }
       }
       setMindMapRoot(cloned);
-      const dot = mindMapToDot(cloned, dotStyle);
+      const dot = mindMapToDot(cloned, dotStyle, edgeStyles);
       setDotSource(dot);
       renderDot(dot);
     },
-    [selectedNodeIds, mindMapRoot, dotStyle, renderDot],
+    [selectedNodeIds, mindMapRoot, dotStyle, edgeStyles, renderDot],
   );
 
-  // 获取选中节点的合并样式（用于边栏展示）
+  // 应用样式到选中的边
+  const applyEdgeStyle = useCallback(
+    (partial: Partial<EdgeStyle>) => {
+      if (selectedEdgeIds.length === 0) return;
+      const next: EdgeStyleMap = { ...edgeStyles };
+      for (const id of selectedEdgeIds) {
+        next[id] = { ...(next[id] || {}), ...partial };
+      }
+      setEdgeStyles(next);
+      const dot = mindMapToDot(mindMapRoot, dotStyle, next);
+      setDotSource(dot);
+      renderDot(dot);
+    },
+    [selectedEdgeIds, edgeStyles, mindMapRoot, dotStyle, renderDot],
+  );
+
+  // 选中节点的合并样式（取第一个有样式的节点）
   const selectedNodeStyle = useMemo((): Partial<NodeStyle> | undefined => {
     if (selectedNodeIds.length === 0) return undefined;
     const all = flatNodes(mindMapRoot);
-    const selectedNodes = all.filter((n) => selectedNodeIds.includes(n.id));
-    if (selectedNodes.length === 0) return undefined;
-    // 合并：取最后一个选中节点的样式（如果多个节点样式不同，展示第一个有样式的）
-    for (const n of selectedNodes) {
-      if (n.style && Object.keys(n.style).length > 0) {
-        return n.style;
-      }
+    const selected = all.filter((n) => selectedNodeIds.includes(n.id));
+    for (const n of selected) {
+      if (n.style && Object.keys(n.style).length > 0) return n.style;
     }
     return undefined;
   }, [selectedNodeIds, mindMapRoot]);
+
+  // 选中边的合并样式
+  const selectedEdgeStyle = useMemo((): Partial<EdgeStyle> | undefined => {
+    if (selectedEdgeIds.length === 0) return undefined;
+    for (const id of selectedEdgeIds) {
+      const s = edgeStyles[id];
+      if (s && Object.keys(s).length > 0) return s;
+    }
+    return undefined;
+  }, [selectedEdgeIds, edgeStyles]);
 
   async function openDotFile() {
     const selected = await open({
@@ -158,9 +196,7 @@ function App() {
       filters: [{ name: 'DOT files', extensions: ['dot', 'gv'] }],
     });
 
-    if (typeof selected !== 'string') {
-      return;
-    }
+    if (typeof selected !== 'string') return;
 
     const contents = await readTextFile(selected);
     setCurrentPath(selected);
@@ -176,9 +212,7 @@ function App() {
         filters: [{ name: 'DOT files', extensions: ['dot', 'gv'] }],
       }));
 
-    if (!targetPath) {
-      return;
-    }
+    if (!targetPath) return;
 
     await writeTextFile(targetPath, dotSource);
     setCurrentPath(targetPath);
@@ -244,17 +278,21 @@ function App() {
           <>
             <DotStylePanel
               globalStyle={dotStyle}
+              selectedNodeIds={selectedNodeIds}
+              selectedEdgeIds={selectedEdgeIds}
               selectedNodeStyle={selectedNodeStyle}
-              selectedCount={selectedNodeIds.length}
+              selectedEdgeStyle={selectedEdgeStyle}
               onChangeGlobal={setDotStyle}
-              onChangeSelected={applyNodeStyle}
+              onChangeNodeSelected={applyNodeStyle}
+              onChangeEdgeSelected={applyEdgeStyle}
             />
             <MindMap
               root={mindMapRoot}
+              edgeStyles={edgeStyles}
+              globalStyle={dotStyle}
               onChange={handleMindMapChange}
               onDotChange={handleDotFromMindMap}
-              onSelectionChange={setSelectedNodeIds}
-              style={dotStyle}
+              onSelectionChange={handleSelectionChange}
             />
           </>
         ) : (

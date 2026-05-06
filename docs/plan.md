@@ -35,7 +35,7 @@
 - [x] `docs/plan.md`
 - [x] `.github/skills/dotdesk-dev/SKILL.md`
 
-## 阶段四：DOT 样式边栏
+## 阶段四：DOT 样式边栏 ✅
 
 - [x] `DotStyleConfig` 类型定义（Graph/Node/Edge）
 - [x] `DotStylePanel` 边栏组件：折叠分组 + 完整属性控件
@@ -45,11 +45,27 @@
 - [x] MindMapNode 添加可选 style 属性
 - [x] 表单控件 Dark 主题样式 + 颜色值引号包裹
 
+## 阶段五：交互画布升级 ✅
+
+- [x] 引入 `@xyflow/react` + `dagre` 依赖
+- [x] `MindMapNode` 增加 `position` 字段
+- [x] `EdgeStyleMap` 类型：按 `"src->tgt"` 存储边样式
+- [x] 新增 `MindMapNodeView` 自定义节点组件（双击编辑、样式应用）
+- [x] 重写 `MindMap` 为 ReactFlow 画布
+- [x] dagre 自动初始布局，用户拖动后保留位置
+- [x] Ctrl/Cmd 多选、Shift+拖拽 / 左键空白拖拽 框选
+- [x] 边可被点击选中
+- [x] `mindMapToDot` 支持 edgeStyles 输出逐边样式
+- [x] `DotStylePanel` 上下文感知：根据选中类型显示 Graph/Node/Edge
+- [x] `applyNodeStyle` + `applyEdgeStyle`，按选中元素分别应用
+- [x] ReactFlow 控件 + MiniMap + 暗色主题适配
+
 ## 后续方向（待定）
 
-- [ ] 拖拽调整节点层级
-- [ ] 节点颜色/样式自定义
-- [ ] 撤销/重做
+- [ ] 节点之间自由连线（打破树结构）
+- [ ] 单独删除某条边（不删节点）
+- [ ] 复制 / 粘贴节点
+- [ ] 撤销 / 重做
 - [ ] 折叠/展开子树
-- [ ] 导出 PNG/PDF
+- [ ] 导出 PNG / PDF
 - [ ] LaTeX 文档集成

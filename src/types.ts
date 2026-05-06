@@ -17,6 +17,16 @@ export interface MindMapNode {
   label: string;
   children: MindMapNode[];
   style?: Partial<NodeStyle>;
+  position?: { x: number; y: number };
+}
+
+/** 边样式映射，key 为 "sourceId->targetId" */
+export type EdgeStyleMap = Record<string, Partial<EdgeStyle>>;
+
+/** 选择上下文（同时支持节点与边） */
+export interface SelectionState {
+  nodes: string[];
+  edges: string[];
 }
 
 /* ── DOT 样式配置 ── */

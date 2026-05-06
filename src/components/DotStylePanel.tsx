@@ -316,111 +316,138 @@ function EdgeFields({ style, onChange }: { style: EdgeStyle; onChange: (s: EdgeS
   );
 }
 
-/* ── 主组件（边栏） ── */
+/* ── 主组件（上下文感知的边栏） ── */
 
 type DotStylePanelProps = {
   globalStyle: DotStyleConfig;
+  selectedNodeIds: string[];
+  selectedEdgeIds: string[];
   selectedNodeStyle?: Partial<NodeStyle>;
-  selectedCount: number;
+  selectedEdgeStyle?: Partial<EdgeStyle>;
   onChangeGlobal: (style: DotStyleConfig) => void;
-  onChangeSelected: (s: Partial<NodeStyle>) => void;
+  onChangeNodeSelected: (s: Partial<NodeStyle>) => void;
+  onChangeEdgeSelected: (s: Partial<EdgeStyle>) => void;
 };
 
 export function DotStylePanel({
   globalStyle,
+  selectedNodeIds,
+  selectedEdgeIds,
   selectedNodeStyle,
-  selectedCount,
+  selectedEdgeStyle,
   onChangeGlobal,
-  onChangeSelected,
+  onChangeNodeSelected,
+  onChangeEdgeSelected,
 }: DotStylePanelProps) {
+  const nodeCount = selectedNodeIds.length;
+  const edgeCount = selectedEdgeIds.length;
+  const hasNodes = nodeCount > 0;
+  const hasEdges = edgeCount > 0;
+  const nothingSelected = !hasNodes && !hasEdges;
+
+  // 显示规则：
+  // - 啥也没选：显示 Graph
+  // - 只选 node：显示 Node
+  // - 只选 edge：显示 Edge
+  // - 同时选中 node 与 edge：显示 Node + Edge
+  const showGraph = nothingSelected;
+  const showNode = hasNodes;
+  const showEdge = hasEdges;
+
   const [sections, setSections] = useState<Record<string, boolean>>({
     graph: true,
     node: true,
-    edge: false,
+    edge: true,
   });
 
   const handleReset = () => {
     onChangeGlobal(DEFAULT_DOT_STYLE);
   };
 
-  const nodeLabel = selectedCount > 0
-    ? `Node (${selectedCount} selected)`
-    : 'Node (defaults)';
+  const headerSubtitle = nothingSelected
+    ? 'Canvas'
+    : [
+        hasNodes ? `${nodeCount} node${nodeCount > 1 ? 's' : ''}` : null,
+        hasEdges ? `${edgeCount} edge${edgeCount > 1 ? 's' : ''}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
   return (
     <div className="panel style-sidebar">
       <div className="panel-header">
         <span>Style</span>
+        <span className="style-context-label">{headerSubtitle}</span>
         <button type="button" className="style-reset-btn" onClick={handleReset}>
           Reset
         </button>
       </div>
       <div className="style-sidebar-body">
-        {/* Graph */}
-        <div className="style-section">
-          <button
-            type="button"
-            className="style-section-header"
-            onClick={() => setSections((s) => ({ ...s, graph: !s.graph }))}
-          >
-            <span>{sections.graph ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-            <span>Graph</span>
-          </button>
-          {sections.graph && (
-            <div className="style-section-body">
-              <GraphFields
-                style={globalStyle.graph}
-                onChange={(g) => onChangeGlobal({ ...globalStyle, graph: g })}
-              />
-            </div>
-          )}
-        </div>
+        {/* Graph (only when nothing selected) */}
+        {showGraph && (
+          <div className="style-section">
+            <button
+              type="button"
+              className="style-section-header"
+              onClick={() => setSections((s) => ({ ...s, graph: !s.graph }))}
+            >
+              <span>{sections.graph ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+              <span>Graph</span>
+            </button>
+            {sections.graph && (
+              <div className="style-section-body">
+                <GraphFields
+                  style={globalStyle.graph}
+                  onChange={(g) => onChangeGlobal({ ...globalStyle, graph: g })}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Node */}
-        <div className="style-section">
-          <button
-            type="button"
-            className="style-section-header"
-            onClick={() => setSections((s) => ({ ...s, node: !s.node }))}
-          >
-            <span>{sections.node ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-            <span>{nodeLabel}</span>
-          </button>
-          {sections.node && (
-            <div className="style-section-body">
-              <NodeFields
-                style={selectedCount > 0 ? (selectedNodeStyle ?? globalStyle.node) : globalStyle.node}
-                onChange={(s) => {
-                  if (selectedCount > 0) {
-                    onChangeSelected(s);
-                  } else {
-                    onChangeGlobal({ ...globalStyle, node: s });
-                  }
-                }}
-              />
-            </div>
-          )}
-        </div>
+        {/* Node (when nodes selected) */}
+        {showNode && (
+          <div className="style-section">
+            <button
+              type="button"
+              className="style-section-header"
+              onClick={() => setSections((s) => ({ ...s, node: !s.node }))}
+            >
+              <span>{sections.node ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+              <span>Node ({nodeCount})</span>
+            </button>
+            {sections.node && (
+              <div className="style-section-body">
+                <NodeFields
+                  style={selectedNodeStyle ?? {}}
+                  onChange={(s) => onChangeNodeSelected(s)}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Edge */}
-        <div className="style-section">
-          <button
-            type="button"
-            className="style-section-header"
-            onClick={() => setSections((s) => ({ ...s, edge: !s.edge }))}
-          >
-            <span>{sections.edge ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-            <span>Edge</span>
-          </button>
-          {sections.edge && (
-            <div className="style-section-body">
-              <EdgeFields
-                style={globalStyle.edge}
-                onChange={(e) => onChangeGlobal({ ...globalStyle, edge: e })}
-              />
-            </div>
-          )}
-        </div>
+        {/* Edge (when edges selected) */}
+        {showEdge && (
+          <div className="style-section">
+            <button
+              type="button"
+              className="style-section-header"
+              onClick={() => setSections((s) => ({ ...s, edge: !s.edge }))}
+            >
+              <span>{sections.edge ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+              <span>Edge ({edgeCount})</span>
+            </button>
+            {sections.edge && (
+              <div className="style-section-body">
+                <EdgeFields
+                  style={selectedEdgeStyle ?? {}}
+                  onChange={(e) => onChangeEdgeSelected(e)}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

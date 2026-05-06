@@ -19,9 +19,12 @@
 - ✅ DOT 文件打开/保存
 - ✅ SVG 导出
 - ✅ Graphviz 环境检测与错误日志
-- ✅ 思维导图模式（键盘导航创建节点 + 多选）
+- ✅ 交互画布（基于 ReactFlow，支持节点拖动、Ctrl/Shift 多选、框选）
+- ✅ 边（edge）选中和样式编辑
+- ✅ Style 边栏上下文感知：根据选中类型展示 Graph / Node / Edge 选单
+- ✅ 思维导图键盘操作：Tab/Enter/Delete
 - ✅ 导图导出为 DOT / SVG
-- ✅ DOT 样式边栏（可视化配置 Graph/Node/Edge 属性，Ctrl+Click 多选节点批量修改）
+- ✅ DOT 样式边栏（可视化配置颜色、形状、字体、箭头等全部 DOT 属性）
 
 ## 快速开始
 
@@ -64,23 +67,41 @@ npm run tauri:build
 
 ## 使用指南
 
-### 导图模式
+### 导图画布
 
-按下 **Tab** 创建子节点，**Enter** 创建兄弟节点，双击节点内容进行编辑，**Delete** 删除节点。
-**Ctrl+Click** 多选节点，选中的节点可以在左侧 Style 边栏中批量修改样式。
+思维导图模式提供基于 ReactFlow 的可交互画布：
+
+| 操作 | 行为 |
+|---|---|
+| 单击节点 | 选中（替换之前的选中） |
+| Ctrl/Cmd + 单击 | 多选（添加/移除） |
+| Shift + 拖拽 / 左键空白拖拽 | 框选（marquee select） |
+| 拖拽节点 | 调整位置 |
+| 中键/右键拖拽 | 平移画布 |
+| 滚轮 / 触控板 | 缩放画布 |
+| 双击节点 | 进入文字编辑模式 |
+| **Tab** | 给当前选中节点添加子节点 |
+| **Enter** | 添加兄弟节点 |
+| **Delete / Backspace** | 删除选中的节点（含子树） |
+
+边可被点击选中，选中后在 Style 边栏可编辑边的颜色、线型、箭头、粗细等。
 
 ### 传统 DOT 编辑
 
 也可以在 Monaco 编辑器中直接编辑 DOT 源码，点击 Render 渲染预览。
 
-### 样式边栏
+### Style 边栏（上下文感知）
 
-在思维导图模式下，左侧 **Style** 边栏始终可用。包含三个折叠面板：
-- **Graph** — 布局方向、引擎、间距、背景色等全局属性
-- **Node** — 节点形状、填充色、边框色、字体、尺寸
-- **Edge** — 箭头样式、线型、颜色、粗细
+左侧 **Style** 边栏根据画布选中状态自动切换显示内容：
 
-未选中节点时修改 Node 属性 = 修改全局默认值；选中一个或多个节点后修改 Node 属性 = 应用到所选节点。
+| 选中状态 | 显示区域 |
+|---|---|
+| 啥都没选（点击空白） | Graph |
+| 选中 1+ 节点 | Node |
+| 选中 1+ 边 | Edge |
+| 节点和边都选 | Node + Edge |
+
+每个区域内按功能分组（颜色、字体、尺寸、形状等）展示控件，修改即时生效。
 
 ## 项目结构
 
@@ -90,11 +111,12 @@ dotdesk/
 │   ├── App.tsx             # 主应用 + 状态管理
 │   ├── types.ts            # TypeScript 类型定义
 │   ├── components/         # React 组件
-│   │   ├── DotEditor.tsx   # DOT 编辑器 (Monaco)
-│   │   ├── DotStylePanel.tsx # DOT 样式边栏
-│   │   ├── MindMap.tsx     # 思维导图（支持多选）
-│   │   ├── RenderLog.tsx   # 渲染日志
-│   │   └── RenderLog.tsx   # 渲染日志
+│   │   ├── DotEditor.tsx           # DOT 编辑器 (Monaco)
+│   │   ├── DotStylePanel.tsx       # DOT 样式边栏（上下文感知）
+│   │   ├── MindMap.tsx             # ReactFlow 画布 + DOT 序列化
+│   │   ├── MindMapNodeView.tsx     # 自定义画布节点
+│   │   ├── RenderLog.tsx           # 渲染日志
+│   │   └── SvgPreview.tsx          # SVG 预览
 │   └── styles.css          # 全局样式
 ├── src-tauri/              # Rust 后端源码
 │   ├── src/

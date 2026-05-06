@@ -4,6 +4,45 @@
 
 ---
 
+## [0003] 2026-05-06 — 交互画布升级（ReactFlow + dagre）
+
+### 对话摘要
+第三回合对话，把思维导图重构为真正的可交互画布：
+1. 引入 `@xyflow/react` v12 + `dagre` v0.8 + `@types/dagre` 依赖
+2. `MindMapNode` 增加 `position` 字段；新增 `EdgeStyleMap` 类型按 `"src->tgt"` 存边样式
+3. 新建 `MindMapNodeView`（ReactFlow 自定义节点）：双击编辑、自定义样式、Handle 连接点
+4. 重写 `MindMap` 为 ReactFlow 画布，包含：
+   - `treeToFlow` 树→nodes/edges 转换
+   - `computeMissingLayout` 仅对没有 position 的节点跑 dagre
+   - 拖动写回 tree、键盘 Tab/Enter/Delete 兼容
+   - 选中（节点 + 边）状态上报父组件
+5. `mindMapToDot` 增加 `edgeStyles` 参数，输出 `[color="#xx", penwidth=2, ...]`
+6. `DotStylePanel` 上下文感知：根据 `selectedNodeIds`/`selectedEdgeIds` 显示 Graph/Node/Edge
+7. App 增加 `edgeStyles` 状态、`applyEdgeStyle`、`applyNodeStyle` 与 `selectedEdgeStyle` 衍生
+8. ReactFlow 暗色主题 + MiniMap + Controls 样式适配
+
+### 关键决策
+- 节点位置存在 tree 中（`MindMapNode.position`），使切换模式不丢失布局
+- 首次进入用 dagre 自动布局，仅当节点没有 position 时执行
+- 边样式按 `"sourceId->targetId"` 字符串作为 key（与 ReactFlow 的 edge.id 一致）
+- ReactFlow `selectionOnDrag` + `panOnDrag={[1, 2]}`：左键拖拽 = 框选，中/右键 = 平移
+- 多选键码 `['Control', 'Meta']` 同时支持 Ctrl 和 Cmd
+- 删除根节点禁止；Delete 键只删非根选中节点
+- 删除单条边、自由连线、复制粘贴等留作下一阶段
+
+### 涉及文件
+- `package.json` — 新增 ReactFlow + dagre 依赖
+- `src/main.tsx` — 引入 `@xyflow/react/dist/style.css`
+- `src/types.ts` — `position`、`EdgeStyleMap`、`SelectionState`
+- `src/components/MindMapNodeView.tsx`（新建）
+- `src/components/MindMap.tsx`（重写）
+- `src/components/DotStylePanel.tsx`（上下文感知）
+- `src/App.tsx`（edgeStyles + selection 联动）
+- `src/styles.css`（ReactFlow 暗色主题）
+- `CHANGELOG.md`、`README.md`、`docs/plan.md`
+
+---
+
 ## [0002] 2026-05-06 — DOT 样式边栏与多选支持
 
 ### 对话摘要

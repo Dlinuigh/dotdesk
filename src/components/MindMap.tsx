@@ -1,5 +1,27 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DotStyleConfig, MindMapNode, NodeStyle } from '../types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  Background,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+  type OnSelectionChangeParams,
+  type NodeChange,
+} from '@xyflow/react';
+import dagre from 'dagre';
+import type {
+  DotStyleConfig,
+  EdgeStyle,
+  EdgeStyleMap,
+  GraphStyle,
+  MindMapNode,
+  NodeStyle,
+} from '../types';
+import { MindMapNodeView, type MindMapNodeData } from './MindMapNodeView';
 
 let _idCounter = 0;
 function genId(): string {
@@ -10,82 +32,77 @@ function createNode(label = 'New Node'): MindMapNode {
   return { id: genId(), label, children: [] };
 }
 
-/** 将样式对象转为 DOT 属性字符串 */
+/* ── DOT 序列化 ── */
+
 function styleToAttr(obj: Record<string, unknown>): string {
   return Object.entries(obj)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => {
       const val = typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v);
-      // 颜色值（#开头）、含空格或特殊字符的值需要加引号
       const needsQuote = /^#/.test(val) || /[ ,"']/.test(val);
       return needsQuote ? `  ${k}="${val}"` : `  ${k}=${val}`;
     })
     .join(',\n');
 }
 
-/** 将单个节点的 style 转为内联属性字符串 */
-function nodeStyleToAttr(style: Partial<NodeStyle> | undefined): string {
+function inlineStyleToAttr(style: Partial<NodeStyle> | Partial<EdgeStyle> | undefined): string {
   if (!style) return '';
   const entries = Object.entries(style).filter(([, v]) => v !== undefined && v !== null && v !== '');
   if (entries.length === 0) return '';
   return entries
     .map(([k, v]) => {
-      const val = String(v);
-      const needsQuote = /^#/.test(val) || /[ ,"']/.test(val);
+      const val = typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v);
       return `${k}="${val}"`;
     })
     .join(', ');
 }
 
 /** 从节点树生成 DOT 源码 */
-export function mindMapToDot(root: MindMapNode, style?: DotStyleConfig): string {
+export function mindMapToDot(
+  root: MindMapNode,
+  style?: DotStyleConfig,
+  edgeStyles?: EdgeStyleMap,
+): string {
   const lines: string[] = [];
   lines.push('digraph mindmap {');
 
-  // graph attributes
   if (style?.graph) {
     const g = styleToAttr(style.graph as Record<string, unknown>);
-    if (g) {
-      lines.push(`graph [\n${g}\n];`);
-    }
+    if (g) lines.push(`graph [\n${g}\n];`);
   }
-
-  // node default attributes
   if (style?.node) {
     const n = styleToAttr(style.node as Record<string, unknown>);
-    if (n) {
-      lines.push(`node [\n${n}\n];`);
-    }
+    if (n) lines.push(`node [\n${n}\n];`);
   }
-
-  // edge default attributes
   if (style?.edge) {
     const e = styleToAttr(style.edge as Record<string, unknown>);
-    if (e) {
-      lines.push(`edge [\n${e}\n];`);
-    }
+    if (e) lines.push(`edge [\n${e}\n];`);
   }
 
   lines.push('');
 
   function walk(node: MindMapNode) {
     const escaped = node.label.replace(/"/g, '\\"');
-    const styleAttr = nodeStyleToAttr(node.style);
+    const styleAttr = inlineStyleToAttr(node.style);
     const suffix = styleAttr ? `, ${styleAttr}` : '';
     lines.push(`  "${node.id}" [label="${escaped}"${suffix}];`);
     for (const child of node.children) {
-      lines.push(`  "${node.id}" -> "${child.id}";`);
+      const eid = `${node.id}->${child.id}`;
+      const eStyle = edgeStyles?.[eid];
+      const eAttr = inlineStyleToAttr(eStyle);
+      const edgeSuffix = eAttr ? ` [${eAttr}]` : '';
+      lines.push(`  "${node.id}" -> "${child.id}"${edgeSuffix};`);
       walk(child);
     }
   }
 
   walk(root);
-
   lines.push('}');
   return lines.join('\n');
 }
 
-/** 查找节点（BFS） */
+/* ── 树工具 ── */
+
 function findNode(root: MindMapNode, id: string): MindMapNode | null {
   if (root.id === id) return root;
   for (const child of root.children) {
@@ -95,7 +112,6 @@ function findNode(root: MindMapNode, id: string): MindMapNode | null {
   return null;
 }
 
-/** 查找父节点 */
 function findParent(root: MindMapNode, id: string): MindMapNode | null {
   for (const child of root.children) {
     if (child.id === id) return root;
@@ -105,347 +121,320 @@ function findParent(root: MindMapNode, id: string): MindMapNode | null {
   return null;
 }
 
-/** 深度优先遍历获取所有节点（平铺） */
-function getFlatNodes(root: MindMapNode): MindMapNode[] {
-  const result: MindMapNode[] = [];
-  function walk(node: MindMapNode) {
-    result.push(node);
-    for (const child of node.children) walk(child);
+function flatNodes(root: MindMapNode): MindMapNode[] {
+  const out: MindMapNode[] = [];
+  function walk(n: MindMapNode) {
+    out.push(n);
+    for (const c of n.children) walk(c);
   }
   walk(root);
-  return result;
+  return out;
 }
 
-/** 获取前一个兄弟节点 */
-function prevSibling(parent: MindMapNode, id: string): MindMapNode | null {
-  const idx = parent.children.findIndex((c) => c.id === id);
-  return idx > 0 ? parent.children[idx - 1] : null;
+/** 写入指定节点的 position（返回新树） */
+function setNodePosition(root: MindMapNode, id: string, pos: { x: number; y: number }): MindMapNode {
+  const cloned = structuredClone(root);
+  const target = findNode(cloned, id);
+  if (target) target.position = pos;
+  return cloned;
 }
 
-/* ────────── 组件 ────────── */
+/** 移除指定节点（包括子树） */
+function removeNodeFromTree(root: MindMapNode, ids: string[]): MindMapNode {
+  if (ids.includes(root.id)) return root; // 不允许删除根
+  const cloned = structuredClone(root);
+  function prune(node: MindMapNode) {
+    node.children = node.children.filter((c) => !ids.includes(c.id));
+    for (const c of node.children) prune(c);
+  }
+  prune(cloned);
+  return cloned;
+}
+
+/* ── dagre 布局 ── */
+
+const NODE_W = 160;
+const NODE_H = 44;
+
+function computeMissingLayout(
+  rfNodes: Node<MindMapNodeData>[],
+  rfEdges: Edge[],
+  rankdir: GraphStyle['rankdir'] = 'LR',
+): Node<MindMapNodeData>[] {
+  const allHave = rfNodes.every((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
+  if (allHave) return rfNodes;
+
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: rankdir || 'LR', nodesep: 40, ranksep: 100 });
+  g.setDefaultEdgeLabel(() => ({}));
+  rfNodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
+  rfEdges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+
+  return rfNodes.map((n) => {
+    if (n.position && (n.position.x !== 0 || n.position.y !== 0)) return n;
+    const laid = g.node(n.id);
+    return { ...n, position: { x: laid.x - NODE_W / 2, y: laid.y - NODE_H / 2 } };
+  });
+}
+
+/* ── 树 ↔ ReactFlow ── */
+
+function dashFromStyle(style: string | undefined): string | undefined {
+  switch (style) {
+    case 'dashed':
+      return '6 4';
+    case 'dotted':
+      return '2 3';
+    default:
+      return undefined;
+  }
+}
+
+function treeToFlow(
+  root: MindMapNode,
+  edgeStyles: EdgeStyleMap,
+  globalEdge: Partial<EdgeStyle> | undefined,
+  callbacks: { onLabelChange: (id: string, label: string) => void; rankdir: GraphStyle['rankdir'] },
+): { rfNodes: Node<MindMapNodeData>[]; rfEdges: Edge[] } {
+  const rfNodes: Node<MindMapNodeData>[] = [];
+  const rfEdges: Edge[] = [];
+
+  function walk(node: MindMapNode) {
+    rfNodes.push({
+      id: node.id,
+      type: 'mindNode',
+      position: node.position ?? { x: 0, y: 0 },
+      data: {
+        label: node.label,
+        style: node.style,
+        onLabelChange: callbacks.onLabelChange,
+        rankdir: callbacks.rankdir,
+      },
+    });
+    for (const child of node.children) {
+      const eid = `${node.id}->${child.id}`;
+      const eStyle = { ...(globalEdge || {}), ...(edgeStyles[eid] || {}) };
+      const stroke = eStyle.color || '#5b7cfa';
+      const strokeWidth = eStyle.penwidth ?? 1;
+      const dashArray = dashFromStyle(eStyle.style);
+      rfEdges.push({
+        id: eid,
+        source: node.id,
+        target: child.id,
+        type: 'smoothstep',
+        style: {
+          stroke,
+          strokeWidth,
+          ...(dashArray ? { strokeDasharray: dashArray } : {}),
+        },
+        markerEnd: { type: 'arrowclosed' as const, color: stroke, width: 16, height: 16 },
+        data: { edgeStyle: eStyle },
+      });
+      walk(child);
+    }
+  }
+
+  walk(root);
+  return { rfNodes, rfEdges };
+}
+
+/* ── 主组件 ── */
+
+const nodeTypes = { mindNode: MindMapNodeView };
 
 type MindMapProps = {
   root: MindMapNode;
+  edgeStyles: EdgeStyleMap;
+  globalStyle?: DotStyleConfig;
   onChange: (root: MindMapNode) => void;
   onDotChange: (dot: string) => void;
-  onSelectionChange?: (ids: string[]) => void;
-  style?: DotStyleConfig;
+  onSelectionChange?: (nodeIds: string[], edgeIds: string[]) => void;
 };
 
-export function MindMap({ root, onChange, onDotChange, onSelectionChange, style }: MindMapProps) {
-  const [activeId, setActiveId] = useState(root.id);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set([root.id]));
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+function MindMapInner({
+  root,
+  edgeStyles,
+  globalStyle,
+  onChange,
+  onDotChange,
+  onSelectionChange,
+}: MindMapProps) {
+  const rankdir = globalStyle?.graph?.rankdir ?? 'LR';
   const containerRef = useRef<HTMLDivElement>(null);
-  const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
-  // 通知外部选中变化
-  useEffect(() => {
-    onSelectionChange?.(Array.from(selectedIds));
-  }, [selectedIds, onSelectionChange]);
-
-  // 通知外部 DOT 变更
-  const notifyDot = useCallback(
-    (node: MindMapNode) => {
-      onDotChange(mindMapToDot(node, style));
+  // 节点 label 修改回调（编辑提交时触发）
+  const onLabelChange = useCallback(
+    (id: string, label: string) => {
+      const cloned = structuredClone(root);
+      const target = findNode(cloned, id);
+      if (target) target.label = label;
+      onChange(cloned);
     },
-    [onDotChange, style],
+    [root, onChange],
   );
 
-  // 更新树（不可变）
-  const updateTree = useCallback(
-    (fn: (node: MindMapNode) => MindMapNode) => {
-      const updated = fn(structuredClone(root));
+  // 树 → RF 数据（每次 root/style 变化重新计算）
+  const flowData = useMemo(
+    () =>
+      treeToFlow(root, edgeStyles, globalStyle?.edge, {
+        onLabelChange,
+        rankdir,
+      }),
+    [root, edgeStyles, globalStyle?.edge, onLabelChange, rankdir],
+  );
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindMapNodeData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // 同步 RF 状态：root 结构变化或样式变化时重建 nodes/edges
+  useEffect(() => {
+    const positioned = computeMissingLayout(flowData.rfNodes, flowData.rfEdges, rankdir);
+    setNodes(positioned);
+    setEdges(flowData.rfEdges);
+
+    // 如果有节点没有位置（首次布局），把布局结果写回 tree
+    const treeAllHavePositions = flatNodes(root).every(
+      (n) => n.position && (n.position.x !== 0 || n.position.y !== 0),
+    );
+    if (!treeAllHavePositions) {
+      const cloned = structuredClone(root);
+      for (const n of positioned) {
+        const target = findNode(cloned, n.id);
+        if (target) target.position = n.position;
+      }
+      onChange(cloned);
+    }
+  }, [flowData, rankdir, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 通知 DOT 变化
+  useEffect(() => {
+    onDotChange(mindMapToDot(root, globalStyle, edgeStyles));
+  }, [root, globalStyle, edgeStyles, onDotChange]);
+
+  // 选择变化
+  const handleSelectionChange = useCallback(
+    (params: OnSelectionChangeParams) => {
+      const ns = params.nodes.map((n) => n.id);
+      const es = params.edges.map((e) => e.id);
+      setSelectedNodeIds(ns);
+      setSelectedEdgeIds(es);
+      if (ns.length > 0) setActiveId(ns[ns.length - 1]);
+      onSelectionChange?.(ns, es);
+    },
+    [onSelectionChange],
+  );
+
+  // 节点拖动结束：写入 position 到 tree
+  const onNodeDragStop = useCallback(
+    (_e: React.MouseEvent, node: Node) => {
+      const updated = setNodePosition(root, node.id, node.position);
       onChange(updated);
-      notifyDot(updated);
     },
-    [root, onChange, notifyDot],
+    [root, onChange],
   );
 
-  // 聚焦编辑框
-  useEffect(() => {
-    if (editingId && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [editingId]);
-
-  // 选中节点滚动到视图中
-  useEffect(() => {
-    const el = nodeRefs.current.get(activeId);
-    if (el && containerRef.current) {
-      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }
-  }, [activeId]);
-
-  // 确保 activeId 始终存在
-  useEffect(() => {
-    if (!findNode(root, activeId)) {
-      setActiveId(root.id);
-      setSelectedIds(new Set([root.id]));
-    }
-  }, [root, activeId]);
-
-  /* ── 选择操作 ── */
-
-  const handleNodeClick = useCallback(
-    (e: React.MouseEvent, id: string) => {
-      e.stopPropagation();
-      setActiveId(id);
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+Click: 切换选中
-        setSelectedIds((prev) => {
-          const next = new Set(prev);
-          if (next.has(id)) {
-            if (next.size > 1) next.delete(id); // 保留至少一个选中
-          } else {
-            next.add(id);
+  // 节点变化（捕获多选拖动）
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<Node<MindMapNodeData>>[]) => {
+      onNodesChange(changes);
+      // 多选拖动时，position 类型变化的 dragging=false 表示拖动结束
+      const dragEnded = changes.filter(
+        (c) => c.type === 'position' && (c as { dragging?: boolean }).dragging === false,
+      );
+      if (dragEnded.length > 1) {
+        let updated = root;
+        for (const ch of dragEnded) {
+          const change = ch as { id: string; position?: { x: number; y: number } };
+          if (change.position) {
+            updated = setNodePosition(updated, change.id, change.position);
           }
-          return next;
-        });
-      } else {
-        // 普通点击：单选
-        setSelectedIds(new Set([id]));
+        }
+        if (updated !== root) onChange(updated);
       }
     },
-    [],
+    [onNodesChange, root, onChange],
   );
 
-  /* ── 导航 ── */
-
-  const selectNext = useCallback(() => {
-    const flat = getFlatNodes(root);
-    const idx = flat.findIndex((n) => n.id === activeId);
-    if (idx < flat.length - 1) {
-      const nextId = flat[idx + 1].id;
-      setActiveId(nextId);
-      setSelectedIds(new Set([nextId]));
-    }
-  }, [root, activeId]);
-
-  const selectPrev = useCallback(() => {
-    const flat = getFlatNodes(root);
-    const idx = flat.findIndex((n) => n.id === activeId);
-    if (idx > 0) {
-      const prevId = flat[idx - 1].id;
-      setActiveId(prevId);
-      setSelectedIds(new Set([prevId]));
-    }
-  }, [root, activeId]);
-
-  const selectFirstChild = useCallback(() => {
-    const target = findNode(root, activeId);
-    if (target && target.children.length > 0) {
-      const childId = target.children[0].id;
-      setActiveId(childId);
-      setSelectedIds(new Set([childId]));
-    }
-  }, [root, activeId]);
-
-  const selectParent = useCallback(() => {
-    const parent = findParent(root, activeId);
-    if (parent) {
-      setActiveId(parent.id);
-      setSelectedIds(new Set([parent.id]));
-    }
-  }, [root, activeId]);
-
-  /* ── 操作 ── */
+  /* ── 编辑操作 ── */
 
   const addChild = useCallback(() => {
-    updateTree((node) => {
-      const target = findNode(node, activeId);
-      if (target) {
-        const child = createNode();
-        target.children.push(child);
-        setActiveId(child.id);
-        setSelectedIds(new Set([child.id]));
-      }
-      return node;
-    });
-  }, [activeId, updateTree]);
+    const target = activeId ?? root.id;
+    const cloned = structuredClone(root);
+    const targetNode = findNode(cloned, target);
+    if (!targetNode) return;
+    const child = createNode();
+    // 位置：偏移自父节点
+    if (targetNode.position) {
+      const offsetX = rankdir === 'LR' ? 220 : 0;
+      const offsetY = rankdir === 'LR' ? targetNode.children.length * 60 : 100;
+      child.position = {
+        x: targetNode.position.x + offsetX,
+        y: targetNode.position.y + offsetY,
+      };
+    }
+    targetNode.children.push(child);
+    onChange(cloned);
+    setActiveId(child.id);
+    setSelectedNodeIds([child.id]);
+  }, [activeId, root, rankdir, onChange]);
 
   const addSibling = useCallback(() => {
-    if (activeId === root.id) {
+    if (!activeId || activeId === root.id) {
       addChild();
       return;
     }
-    updateTree((node) => {
-      const parent = findParent(node, activeId);
-      if (parent) {
-        const sibling = createNode();
-        const idx = parent.children.findIndex((c) => c.id === activeId);
-        parent.children.splice(idx + 1, 0, sibling);
-        setActiveId(sibling.id);
-        setSelectedIds(new Set([sibling.id]));
-      }
-      return node;
-    });
-  }, [root.id, activeId, addChild, updateTree]);
+    const cloned = structuredClone(root);
+    const parent = findParent(cloned, activeId);
+    if (!parent) return;
+    const idx = parent.children.findIndex((c) => c.id === activeId);
+    const sibling = createNode();
+    const refNode = parent.children[idx];
+    if (refNode.position) {
+      sibling.position = {
+        x: refNode.position.x,
+        y: refNode.position.y + (rankdir === 'LR' ? 60 : 100),
+      };
+    }
+    parent.children.splice(idx + 1, 0, sibling);
+    onChange(cloned);
+    setActiveId(sibling.id);
+    setSelectedNodeIds([sibling.id]);
+  }, [activeId, root, rankdir, addChild, onChange]);
 
-  const deleteNode = useCallback(() => {
-    if (activeId === root.id) return;
-    updateTree((node) => {
-      const parent = findParent(node, activeId);
-      if (parent) {
-        const idx = parent.children.findIndex((c) => c.id === activeId);
-        const prev = idx > 0 ? parent.children[idx - 1] : null;
-        parent.children.splice(idx, 1);
-        // 删除后选中父节点或前一个兄弟
-        const nextId = prev ? prev.id : parent.id;
-        setActiveId(nextId);
-        setSelectedIds(new Set([nextId]));
-      }
-      return node;
-    });
-  }, [root.id, activeId, updateTree]);
-
-  const startEdit = useCallback((id: string, label: string) => {
-    setEditingId(id);
-    setEditValue(label);
-  }, []);
-
-  const commitEdit = useCallback(() => {
-    if (editingId === null) return;
-    const trimmed = editValue.trim() || 'Untitled';
-    updateTree((node) => {
-      const target = findNode(node, editingId);
-      if (target) target.label = trimmed;
-      return node;
-    });
-    setEditingId(null);
-    containerRef.current?.focus();
-  }, [editingId, editValue, updateTree]);
+  const deleteSelected = useCallback(() => {
+    const toRemove = selectedNodeIds.filter((id) => id !== root.id);
+    if (toRemove.length === 0) return;
+    const updated = removeNodeFromTree(root, toRemove);
+    onChange(updated);
+    setSelectedNodeIds([]);
+    setActiveId(null);
+  }, [selectedNodeIds, root, onChange]);
 
   /* ── 键盘事件 ── */
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (editingId) {
-        if (e.key === 'Escape') {
-          setEditingId(null);
-        } else if (e.key === 'Enter') {
-          commitEdit();
-        }
-        return;
-      }
+      // 正在编辑 input 时不拦截
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-      switch (e.key) {
-        case 'Tab':
-          e.preventDefault();
-          addChild();
-          break;
-        case 'Enter':
-          e.preventDefault();
-          addSibling();
-          break;
-        case 'Delete':
-        case 'Backspace':
-          e.preventDefault();
-          deleteNode();
-          break;
-        case 'ArrowDown':
-          e.preventDefault();
-          selectNext();
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          selectPrev();
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          selectFirstChild();
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          selectParent();
-          break;
-        case ' ':
-          e.preventDefault();
-          {
-            const node = findNode(root, activeId);
-            if (node) startEdit(node.id, node.label);
-          }
-          break;
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        addChild();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        addSibling();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        deleteSelected();
       }
     },
-    [editingId, addChild, addSibling, deleteNode, commitEdit, selectNext, selectPrev, selectFirstChild, selectParent, root, activeId, startEdit],
+    [addChild, addSibling, deleteSelected],
   );
-
-  /* ── 渲染节点树 ── */
-
-  function renderNode(node: MindMapNode, depth: number): React.ReactNode {
-    const isSelected = selectedIds.has(node.id);
-    const isActive = node.id === activeId;
-    const isEditing = node.id === editingId;
-
-    const dotColor = isActive && isSelected ? '#ff6b6b' : '#5b7cfa';
-
-    return (
-      <div key={node.id} style={{ marginLeft: depth > 0 ? 28 : 0 }}>
-        <div
-          ref={(el) => {
-            if (el) nodeRefs.current.set(node.id, el);
-            else nodeRefs.current.delete(node.id);
-          }}
-          className={`mm-node${isSelected ? ' mm-node--selected' : ''}${isActive ? ' mm-node--active' : ''}`}
-          style={{
-            border: `2px solid ${dotColor}`,
-            borderRadius: 10,
-            padding: '6px 14px',
-            margin: '4px 0',
-            cursor: 'pointer',
-            background: isSelected ? '#1e2a4a' : '#141b2b',
-            transition: 'border-color 0.15s, background 0.15s',
-            display: 'inline-block',
-            minWidth: 80,
-            outline: isSelected ? '1px solid #6f8dff88' : undefined,
-          }}
-          onClick={(e) => handleNodeClick(e, node.id)}
-          onDoubleClick={() => startEdit(node.id, node.label)}
-        >
-          {isEditing ? (
-            <input
-              ref={inputRef}
-              className="mm-edit-input"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={commitEdit}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitEdit();
-                if (e.key === 'Escape') {
-                  setEditingId(null);
-                  containerRef.current?.focus();
-                }
-                e.stopPropagation();
-              }}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: '#ecf2ff',
-                font: 'inherit',
-                fontSize: '0.95rem',
-                minWidth: 40,
-                width: `${Math.max(40, editValue.length * 9)}px`,
-              }}
-            />
-          ) : (
-            <span style={{ fontSize: '0.95rem', fontWeight: isSelected ? 700 : 500, userSelect: 'none' }}>
-              {node.label}
-            </span>
-          )}
-        </div>
-        {node.children.length > 0 && (
-          <div style={{ borderLeft: '2px solid #34415f', marginLeft: 14, paddingLeft: 14 }}>
-            {node.children.map((child) => renderNode(child, depth + 1))}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div
@@ -453,17 +442,52 @@ export function MindMap({ root, onChange, onDotChange, onSelectionChange, style 
       className="panel mindmap-panel"
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      style={{ outline: 'none', overflow: 'auto' }}
+      style={{ outline: 'none' }}
     >
       <div className="panel-header">
         <span>Mind Map</span>
         <span style={{ fontSize: '0.75rem', color: '#93a4c7' }}>
-          Tab:子节点 · Enter:兄弟节点 · 方向键:移动 · Space:编辑 · Del:删除
+          Tab:子节点 · Enter:兄弟节点 · Del:删除 · Ctrl/⌘+Click:多选 · Shift+拖拽:框选 · 双击:编辑
         </span>
       </div>
-      <div style={{ padding: '1.2rem 1.5rem', minHeight: 200 }}>
-        {renderNode(root, 0)}
+      <div className="mindmap-canvas">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={onEdgesChange}
+          onSelectionChange={handleSelectionChange}
+          onNodeDragStop={onNodeDragStop}
+          nodesConnectable={false}
+          selectionOnDrag
+          panOnDrag={[1, 2]}
+          multiSelectionKeyCode={['Control', 'Meta']}
+          selectionKeyCode="Shift"
+          deleteKeyCode={null}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background gap={16} size={1} color="#26334d" />
+          <Controls position="bottom-right" />
+          <MiniMap
+            position="top-right"
+            pannable
+            zoomable
+            maskColor="rgba(16,21,34,0.7)"
+            style={{ background: '#141b2b', border: '1px solid #26334d' }}
+          />
+        </ReactFlow>
       </div>
     </div>
+  );
+}
+
+export function MindMap(props: MindMapProps) {
+  return (
+    <ReactFlowProvider>
+      <MindMapInner {...props} />
+    </ReactFlowProvider>
   );
 }

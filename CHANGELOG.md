@@ -1,5 +1,27 @@
 # Changelog
 
+## [2026-05-06] — 交互画布升级
+
+### 新增
+- 思维导图升级为基于 ReactFlow 的可交互画布
+- 节点支持鼠标拖动调整位置
+- 多选支持：Ctrl/Cmd+Click 多选、Shift+拖拽框选、左键拖拽框选
+- 边（edge）选中能力，可编辑边的样式（颜色、线型、箭头、粗细等）
+- Style 边栏上下文感知：
+  - 点击空白 → 显示 Graph 选项
+  - 选中节点 → 显示 Node 选项
+  - 选中边 → 显示 Edge 选项
+  - 同时选中 → 显示 Node + Edge
+- 初次进入用 dagre 自动布局，之后保留用户拖动位置
+- ReactFlow 内置控件：缩放、适配视图、小地图（MiniMap）
+- `EdgeStyleMap` 类型 + `applyEdgeStyle`，按边 ID 存储独立样式
+- `MindMapNode` 新增 `position` 字段，参与 DOT 渲染但仅供画布使用
+
+### 变更
+- `mindMapToDot` 新增 `edgeStyles` 参数，输出逐边样式
+- `DotStylePanel` props 重构：拆分 node/edge 选中处理回调
+- 新增 `@xyflow/react`、`dagre` 依赖
+
 ## [2026-05-06]
 
 ### 新增
