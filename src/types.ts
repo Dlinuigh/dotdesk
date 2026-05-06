@@ -10,3 +10,10 @@ export type GraphvizStatus = {
   version: string | null;
   message: string;
 };
+
+/** 思维导图节点 */
+export interface MindMapNode {
+  id: string;
+  label: string;
+  children: MindMapNode[];
+}
