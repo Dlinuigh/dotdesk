@@ -9,6 +9,9 @@ export function RenderLog({ graphvizStatus, renderResult }: RenderLogProps) {
   const statusClass = graphvizStatus?.available ? 'status-ok' : 'status-error';
   const logText = [
     graphvizStatus?.message,
+    graphvizStatus?.process_path
+      ? `PATH (this process, search order):\n${graphvizStatus.process_path}`
+      : '',
     renderResult?.stdout ? `stdout:\n${renderResult.stdout}` : '',
     renderResult?.stderr ? `stderr:\n${renderResult.stderr}` : '',
   ]

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import { Download, FileDown, FileInput, GitBranch, Save, Wand2 } from 'lucide-react';
+import { FileInput, GitBranch, PanelLeft, PanelRight, Terminal, Wand2 } from 'lucide-react';
 import { DotEditor } from './components/DotEditor';
 import { DotStylePanel } from './components/DotStylePanel';
 import { MindMap, mindMapToDot } from './components/MindMap';
@@ -66,6 +67,12 @@ function App() {
   const [dotStyle, setDotStyle] = useState<DotStyleConfig>(DEFAULT_DOT_STYLE);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+  const [panels, setPanels] = useState({ style: true, preview: true, log: true });
+  const [previewEngine, setPreviewEngine] = useState<'dot' | 'latex'>('dot');
+
+  const togglePanel = useCallback((key: 'style' | 'preview' | 'log') => {
+    setPanels((p) => ({ ...p, [key]: !p[key] }));
+  }, []);
 
   const fileLabel = useMemo(() => currentPath ?? 'Untitled graph.dot', [currentPath]);
 
@@ -76,11 +83,13 @@ function App() {
   }, []);
 
   const renderDot = useCallback(
-    async (source?: string) => {
+    async (source?: string, engineOverride?: 'dot' | 'latex') => {
       setIsRendering(true);
       const src = source ?? dotSource;
+      const engine = engineOverride ?? previewEngine;
       try {
-        const result = await invoke<RenderResult>('render_dot_to_svg', { source: src });
+        const cmd = engine === 'latex' ? 'compile_via_latex' : 'render_dot_to_svg';
+        const result = await invoke<RenderResult>(cmd, { source: src });
         setRenderResult(result);
         setSvg(result.svg ?? '');
         return result;
@@ -98,7 +107,7 @@ function App() {
         setIsRendering(false);
       }
     },
-    [dotSource],
+    [dotSource, previewEngine],
   );
 
   useEffect(() => {
@@ -116,6 +125,12 @@ function App() {
     setDotSource(dot);
     renderDot(dot);
   }, [dotStyle, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 切换渲染引擎时立即重渲染当前 dotSource
+  useEffect(() => {
+    if (!dotSource) return;
+    renderDot(dotSource, previewEngine);
+  }, [previewEngine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMindMapChange = useCallback((newRoot: MindMapNode) => {
     setMindMapRoot(newRoot);
@@ -231,6 +246,75 @@ function App() {
     }
   }
 
+  // 后续 latex-backend 任务实现：暂时占位，菜单可点但调用会失败
+  async function exportPdf() {
+    const targetPath = await save({
+      defaultPath: 'graph.pdf',
+      filters: [{ name: 'PDF files', extensions: ['pdf'] }],
+    });
+    if (!targetPath) return;
+    try {
+      const result = await invoke<RenderResult & { pdf?: string }>('compile_via_latex', {
+        source: dotSource,
+        outputPath: targetPath,
+      });
+      setRenderResult(result);
+    } catch (error) {
+      setRenderResult({
+        ok: false,
+        svg: null,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async function checkLatex() {
+    try {
+      const status = await invoke<GraphvizStatus>('check_latex');
+      setGraphvizStatus(status);
+    } catch (error) {
+      const process_path = await invoke<string>('get_process_path_debug').catch(() => '');
+      setGraphvizStatus({
+        available: false,
+        version: null,
+        message: `LaTeX check failed: ${error instanceof Error ? error.message : String(error)}`,
+        process_path,
+      });
+    }
+  }
+
+  /* ── 原生菜单事件订阅 ── */
+
+  const handlersRef = useRef<Record<string, () => void>>({});
+  // 每次渲染同步最新闭包到 ref，避免重新挂载监听器
+  handlersRef.current = {
+    'file:open': () => void openDotFile(),
+    'file:save': () => void saveDotFile(),
+    'file:render': () => void renderDot(),
+    'file:export-svg': () => void exportSvg(),
+    'file:export-pdf': () => void exportPdf(),
+    'view:mode-mindmap': () => setMode('mindmap'),
+    'view:mode-editor': () => setMode('editor'),
+    'view:toggle-style': () => togglePanel('style'),
+    'view:toggle-preview': () => togglePanel('preview'),
+    'view:toggle-log': () => togglePanel('log'),
+    'render:check-graphviz': () => void checkGraphviz(),
+    'render:check-latex': () => void checkLatex(),
+    'render:engine-dot': () => setPreviewEngine('dot'),
+    'render:engine-latex': () => setPreviewEngine('latex'),
+  };
+
+  useEffect(() => {
+    const unlistenPromise = listen<string>('menu', (event) => {
+      const handler = handlersRef.current[event.payload];
+      handler?.();
+    });
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, []);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -255,37 +339,58 @@ function App() {
               <FileInput size={16} /> DOT Editor
             </button>
           </div>
-          <button type="button" onClick={openDotFile}>
-            <FileInput size={16} /> Open
-          </button>
-          <button type="button" onClick={saveDotFile}>
-            <Save size={16} /> Save
-          </button>
           <button type="button" onClick={() => renderDot()} disabled={isRendering}>
             <Wand2 size={16} /> {isRendering ? 'Rendering...' : 'Render'}
           </button>
-          <button type="button" onClick={exportSvg} disabled={!svg && !dotSource}>
-            <Download size={16} /> Export SVG
-          </button>
-          <button type="button" onClick={checkGraphviz}>
-            <FileDown size={16} /> Check Graphviz
-          </button>
+          <div className="panel-toggle-group">
+            <button
+              type="button"
+              className={`icon-toggle${panels.style ? ' icon-toggle--on' : ''}`}
+              onClick={() => togglePanel('style')}
+              title="Toggle Style sidebar"
+              disabled={mode !== 'mindmap'}
+            >
+              <PanelLeft size={16} />
+            </button>
+            <button
+              type="button"
+              className={`icon-toggle${panels.preview ? ' icon-toggle--on' : ''}`}
+              onClick={() => togglePanel('preview')}
+              title="Toggle SVG preview"
+            >
+              <PanelRight size={16} />
+            </button>
+            <button
+              type="button"
+              className={`icon-toggle${panels.log ? ' icon-toggle--on' : ''}`}
+              onClick={() => togglePanel('log')}
+              title="Toggle render log"
+            >
+              <Terminal size={16} />
+            </button>
+          </div>
         </div>
       </header>
 
-      <section className={`workspace ${mode === 'mindmap' ? 'workspace--with-sidebar' : ''}`}>
+      <section
+        className={`workspace${mode === 'mindmap' && panels.style ? ' workspace--with-sidebar' : ''}${
+          panels.preview ? '' : ' workspace--no-preview'
+        }`}
+      >
         {mode === 'mindmap' ? (
           <>
-            <DotStylePanel
-              globalStyle={dotStyle}
-              selectedNodeIds={selectedNodeIds}
-              selectedEdgeIds={selectedEdgeIds}
-              selectedNodeStyle={selectedNodeStyle}
-              selectedEdgeStyle={selectedEdgeStyle}
-              onChangeGlobal={setDotStyle}
-              onChangeNodeSelected={applyNodeStyle}
-              onChangeEdgeSelected={applyEdgeStyle}
-            />
+            {panels.style && (
+              <DotStylePanel
+                globalStyle={dotStyle}
+                selectedNodeIds={selectedNodeIds}
+                selectedEdgeIds={selectedEdgeIds}
+                selectedNodeStyle={selectedNodeStyle}
+                selectedEdgeStyle={selectedEdgeStyle}
+                onChangeGlobal={setDotStyle}
+                onChangeNodeSelected={applyNodeStyle}
+                onChangeEdgeSelected={applyEdgeStyle}
+              />
+            )}
             <MindMap
               root={mindMapRoot}
               edgeStyles={edgeStyles}
@@ -298,10 +403,17 @@ function App() {
         ) : (
           <DotEditor value={dotSource} onChange={setDotSource} />
         )}
-        <SvgPreview svg={svg} emptyMessage="Render a DOT graph to see the SVG preview." />
+        {panels.preview && (
+          <SvgPreview
+            svg={svg}
+            emptyMessage="Render a DOT graph to see the SVG preview."
+            engine={previewEngine}
+            onEngineChange={setPreviewEngine}
+          />
+        )}
       </section>
 
-      <RenderLog graphvizStatus={graphvizStatus} renderResult={renderResult} />
+      {panels.log && <RenderLog graphvizStatus={graphvizStatus} renderResult={renderResult} />}
     </main>
   );
 }

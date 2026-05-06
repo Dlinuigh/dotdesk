@@ -36,8 +36,10 @@ function MindMapNodeViewImpl(props: NodeProps) {
   const fillColor = nodeFillToCss(data.style, '#eef4ff');
   const strokeColor = data.style?.color || '#5b7cfa';
   const fontColor = data.style?.fontcolor || '#1a2235';
-  const fontSize = data.style?.fontsize ?? 14;
+  const fontSize = data.style?.fontsize ?? 18;
   const fontFamily = data.style?.fontname || 'Inter';
+  const fontWeight = data.style?.fontweight === 'bold' ? 700 : 500;
+  const fontStyle = data.style?.fontstyle === 'italic' ? 'italic' : 'normal';
   const penWidth = data.style?.penwidth ?? 1;
   const rankdir = data.rankdir ?? 'LR';
 
@@ -60,6 +62,8 @@ function MindMapNodeViewImpl(props: NodeProps) {
         color: fontColor,
         fontSize,
         fontFamily,
+        fontWeight,
+        fontStyle,
         boxShadow: selected ? `0 0 0 2px ${strokeColor}66` : undefined,
       }}
       onDoubleClick={(e) => {
@@ -83,7 +87,7 @@ function MindMapNodeViewImpl(props: NodeProps) {
               setEditing(false);
             }
           }}
-          style={{ color: fontColor, fontSize, fontFamily }}
+          style={{ color: fontColor, fontSize, fontFamily, fontWeight, fontStyle }}
         />
       ) : (
         <span className="mm-rf-label">{data.label}</span>

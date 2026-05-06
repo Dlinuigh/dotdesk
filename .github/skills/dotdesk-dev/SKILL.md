@@ -105,10 +105,10 @@ digraph mindmap {
 - Graphviz 检测：`invoke<GraphvizStatus>('check_graphviz')`
 - 渲染调用：`invoke<RenderResult>('render_dot_to_svg', { source })`
 - 文件操作：使用 `@tauri-apps/plugin-dialog` 的 `open`/`save`
-- 环境变量 `DOTDESK_GRAPHVIZ_DOT` 可指定自定义 `dot` 路径
+- `dot` 仅在进程 `PATH` 中查找；环境变量 `DOTDESK_GRAPHVIZ_DOT` 可指定 `dot` 的绝对路径
 
 ## 常见问题
 
-- **Graphviz 未找到**: 运行 `brew install graphviz` 或设置环境变量 `DOTDESK_GRAPHVIZ_DOT`
+- **Graphviz 未找到**: 确保 `dot` 所在目录在启动应用的 `PATH` 中，或设置 `DOTDESK_GRAPHVIZ_DOT` 为 `dot` 的完整路径
 - **DOT 语法错误**: 检查 Monaco 编辑器中的 DOT 源码，错误信息显示在 Render Log 面板
 - **SVG 不显示**: 确认 `render_dot_to_svg` 返回的 `ok` 为 `true`

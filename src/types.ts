@@ -9,7 +9,12 @@ export type GraphvizStatus = {
   available: boolean;
   version: string | null;
   message: string;
+  /** 当前进程 PATH 按目录分行编号（Check Graphviz / Check LaTeX 时返回） */
+  process_path: string;
 };
+
+/** 8 方向 */
+export type Dir8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
 
 /** 思维导图节点 */
 export interface MindMapNode {
@@ -17,7 +22,8 @@ export interface MindMapNode {
   label: string;
   children: MindMapNode[];
   style?: Partial<NodeStyle>;
-  position?: { x: number; y: number };
+  /** 子树相对父节点的主生长方向（仅 root 与子树根使用），默认根 = E */
+  growthDirection?: Dir8;
 }
 
 /** 边样式映射，key 为 "sourceId->targetId" */
@@ -59,6 +65,9 @@ export interface NodeStyle {
   fontname?: string;
   fontsize?: number;
   fontcolor?: string;
+  /** 应用层独立的字重/字形（输出 DOT 时拼入 fontname） */
+  fontweight?: 'normal' | 'bold';
+  fontstyle?: 'normal' | 'italic';
   penwidth?: number;
   width?: number;
   height?: number;
@@ -100,7 +109,9 @@ export const DEFAULT_DOT_STYLE: DotStyleConfig = {
     fillcolor: '#eef4ff',
     color: '#5b7cfa',
     fontname: 'Inter',
-    fontsize: 14,
+    fontsize: 18,
+    fontweight: 'normal',
+    fontstyle: 'normal',
     penwidth: 1,
   },
   edge: {

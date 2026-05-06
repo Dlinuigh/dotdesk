@@ -3,6 +3,19 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { DotStyleConfig, GraphStyle, NodeStyle, EdgeStyle } from '../types';
 import { DEFAULT_DOT_STYLE } from '../types';
 
+/* ── 字体家族预设 ── */
+
+export const FONT_FAMILIES = [
+  { value: 'Inter', label: 'Inter (sans-serif)' },
+  { value: 'Arial', label: 'Arial' },
+  { value: 'Helvetica', label: 'Helvetica' },
+  { value: 'Times New Roman', label: 'Times New Roman (serif)' },
+  { value: 'Latin Modern Roman', label: 'Latin Modern Roman (LaTeX)' },
+  { value: 'JetBrains Mono', label: 'JetBrains Mono (mono)' },
+  { value: 'Source Han Serif SC', label: 'Source Han Serif (CJK serif)' },
+  { value: 'Source Han Sans SC', label: 'Source Han Sans (CJK sans)' },
+];
+
 /* ── 辅助控件 ── */
 
 type ColorInputProps = {
@@ -244,8 +257,38 @@ function NodeFields({ style, onChange }: { style: NodeStyle; onChange: (s: NodeS
       </div>
       <div className="style-group">
         <div className="style-group-title">Typography</div>
-        <TextInput label="fontname" value={style.fontname} onChange={(v) => set('fontname', v)} />
+        <SelectInput
+          label="font family"
+          value={style.fontname}
+          options={FONT_FAMILIES}
+          onChange={(v) => set('fontname', v)}
+        />
         <NumberInput label="fontsize" value={style.fontsize} min={1} max={200} step={1} onChange={(v) => set('fontsize', v)} />
+        <div className="style-field style-field--row">
+          <label className="style-label">style</label>
+          <div className="style-toggle-group">
+            <button
+              type="button"
+              className={`style-toggle${style.fontweight === 'bold' ? ' style-toggle--on' : ''}`}
+              onClick={() =>
+                set('fontweight', style.fontweight === 'bold' ? 'normal' : 'bold')
+              }
+              title="Bold"
+            >
+              <strong>B</strong>
+            </button>
+            <button
+              type="button"
+              className={`style-toggle${style.fontstyle === 'italic' ? ' style-toggle--on' : ''}`}
+              onClick={() =>
+                set('fontstyle', style.fontstyle === 'italic' ? 'normal' : 'italic')
+              }
+              title="Italic"
+            >
+              <em>I</em>
+            </button>
+          </div>
+        </div>
       </div>
       <div className="style-group">
         <div className="style-group-title">Dimensions</div>

@@ -62,6 +62,21 @@
 - [x] `applyNodeStyle` + `applyEdgeStyle`，按选中元素分别应用
 - [x] ReactFlow 控件 + MiniMap + 暗色主题适配
 
+## 阶段六：UX 优化（菜单 / 布局 / 字体 / LaTeX） ✅
+
+详见 `docs/latex-pipeline.md`。
+
+- [x] Style 边栏 / SVG 预览 / Render Log 三面板独立隐藏 toggle
+- [x] Tauri 原生菜单（macOS NSMenu）：File / Edit / View / Render
+- [x] 顶部工具栏精简：仅保留 Mode + Render + 三 toggle
+- [x] 自实现 Reingold–Tilford 树布局（替换 dagre）
+- [x] 拖动节点 → snap 到 8 方向，决定子树主生长方向
+- [x] 方向键节点导航（Up/Down/Left/Right）+ 视口跟随
+- [x] 关闭 ReactFlow 默认箭头键移动节点
+- [x] 节点字体：FontFamily 下拉 + Bold/Italic toggle，默认字号 18
+- [x] LaTeX 后端：`check_latex`、`compile_via_latex`（dot2tex + xelatex + pdf2svg）
+- [x] SVG Preview 头部 DOT / LaTeX 引擎切换；导出 PDF 联动
+
 ## 后续方向（待定）
 
 - [ ] 节点之间自由连线（打破树结构）
@@ -69,5 +84,7 @@
 - [ ] 复制 / 粘贴节点
 - [ ] 撤销 / 重做
 - [ ] 折叠/展开子树
-- [ ] 导出 PNG / PDF
-- [ ] LaTeX 文档集成
+- [ ] 导出 PNG
+- [ ] LaTeX preamble 用户可配置
+- [ ] 子节点级 `growthDirection` 真正影响布局（当前仅根生效）
+- [ ] 8 方向中的对角线在布局上独立呈现（当前归入最近主轴）

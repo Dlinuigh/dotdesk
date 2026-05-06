@@ -9,6 +9,8 @@ pub struct GraphvizStatus {
     available: bool,
     version: Option<String>,
     message: String,
+    /// 当前进程可见的 PATH（按目录分行编号），用于核对 dot 等是否在搜索路径里。
+    process_path: String,
 }
 
 #[derive(Serialize)]
@@ -19,43 +21,43 @@ pub struct RenderResult {
     stderr: String,
 }
 
-fn dot_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Ok(configured_path) = env::var("DOTDESK_GRAPHVIZ_DOT") {
-        candidates.push(PathBuf::from(configured_path));
-    }
-
-    candidates.extend([
-        PathBuf::from("/opt/homebrew/bin/dot"),
-        PathBuf::from("/opt/homebrew/opt/graphviz/bin/dot"),
-        PathBuf::from("/usr/local/bin/dot"),
-        PathBuf::from("/usr/local/opt/graphviz/bin/dot"),
-        PathBuf::from("dot"),
-    ]);
-
-    candidates
+#[cfg(windows)]
+fn path_join_dot(dir: &Path) -> PathBuf {
+    dir.join("dot.exe")
 }
 
-fn command_exists(candidate: &Path) -> bool {
-    candidate
-        .to_str()
-        .is_some_and(|value| value == "dot" || candidate.is_file())
+#[cfg(not(windows))]
+fn path_join_dot(dir: &Path) -> PathBuf {
+    dir.join("dot")
 }
 
+/// 仅在 `DOTDESK_GRAPHVIZ_DOT` 或系统 `PATH` 中查找 `dot`（不猜测 Homebrew 等固定路径）。
 fn graphviz_command() -> Option<PathBuf> {
-    dot_candidates()
-        .into_iter()
-        .find(|candidate| command_exists(candidate))
+    if let Ok(p) = env::var("DOTDESK_GRAPHVIZ_DOT") {
+        let pb = PathBuf::from(p);
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
+    let path = env::var("PATH").ok()?;
+    for dir in env::split_paths(&path) {
+        let candidate = path_join_dot(&dir);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 #[tauri::command]
 pub fn check_graphviz() -> GraphvizStatus {
+    let path_block = crate::env_debug::process_path_numbered();
     let Some(dot_path) = graphviz_command() else {
         return GraphvizStatus {
             available: false,
             version: None,
-            message: "Graphviz is not available. Install Graphviz or set DOTDESK_GRAPHVIZ_DOT to the `dot` binary path.".to_string(),
+            message: "Graphviz is not available: no `dot` on PATH and DOTDESK_GRAPHVIZ_DOT is unset or invalid. Install Graphviz and ensure its bin directory is in PATH, or set DOTDESK_GRAPHVIZ_DOT to the full path of `dot`.".to_string(),
+            process_path: path_block,
         };
     };
 
@@ -73,14 +75,16 @@ pub fn check_graphviz() -> GraphvizStatus {
                 } else {
                     format!("Graphviz command returned a non-zero status: {version}")
                 },
+                process_path: path_block,
             }
         }
         Err(error) => GraphvizStatus {
             available: false,
             version: None,
             message: format!(
-                "Graphviz is not available. Install Graphviz or set DOTDESK_GRAPHVIZ_DOT to the `dot` binary path. Details: {error}"
+                "Graphviz is not available: `dot` not found on PATH (or DOTDESK_GRAPHVIZ_DOT invalid). Details: {error}"
             ),
+            process_path: path_block,
         },
     }
 }
@@ -88,7 +92,7 @@ pub fn check_graphviz() -> GraphvizStatus {
 #[tauri::command]
 pub fn render_dot_to_svg(source: String) -> Result<RenderResult, String> {
     let dot_path = graphviz_command().ok_or_else(|| {
-        "Graphviz is not available. Install Graphviz or set DOTDESK_GRAPHVIZ_DOT to the `dot` binary path.".to_string()
+        "Graphviz is not available: no `dot` on PATH; set PATH or DOTDESK_GRAPHVIZ_DOT.".to_string()
     })?;
 
     let mut child = Command::new(dot_path)

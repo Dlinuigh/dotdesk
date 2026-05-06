@@ -1,5 +1,45 @@
 # Changelog
 
+## [2026-05-06] — LaTeX：dot2tex 使用完整文档输出
+
+### 修复
+- `compile_via_latex`：去掉 `--codeonly`，直接编译 dot2tex 生成的完整 `.tex`，避免 TikZ 中 `strokecolor` 等颜色未在序言中定义导致 xelatex 报错
+- 在 `\begin{document}` 后注入 `\tikzset`，把 dot2tex 生成的非法键 `rounded`、`filled` 映射为 `rounded corners` 与 `fill=fillcolor`，修复 pgfkeys 报错
+- 注入 `\providecolor{fillcolor}{HTML}{EEF4FF}`、`strokecolor` 兜底，避免部分 DOT 未定义 `fillcolor` 时 xcolor 报错
+
+## [2026-05-06] — 外部工具：仅 PATH + DOTDESK_* 解析
+
+### 变更
+- `latex`：`xelatex` / `pdf2svg` / `dot2tex` 仅在 `PATH` 中查找，或通过 `DOTDESK_*` 指定绝对路径；`python -m dot2tex` 所用的解释器也须来自 `PATH` 或 `DOTDESK_PYTHON`
+- `graphviz`：`dot` 仅在 `PATH` 中查找，或通过 `DOTDESK_GRAPHVIZ_DOT`；移除内置 Homebrew 等固定路径猜测
+- `docs/latex-pipeline.md`：与上述策略一致
+
+## [2026-05-06] — 画布 UX 优化（菜单 / 树状布局 / 字体 / LaTeX）
+
+### 新增
+- 三个面板（Style 边栏 / SVG 预览 / Render Log）独立可隐藏，顶部新增 icon toggle 组
+- macOS 原生菜单栏（其他平台同一份 Tauri 菜单）：File / Edit / View / Render
+  - File：Open / Save / Render Now / Export SVG / Export PDF
+  - View：Mode 切换、三个面板 toggle
+  - Render：DOT / LaTeX 引擎选择、Check Graphviz、Check LaTeX
+- 节点字体：FontFamily 下拉、Bold / Italic toggle，默认字号由 14 → 18
+- Reingold–Tilford 风格的自动树状布局：兄弟节点根据子树叶子数量自适应间距
+- 拖动节点 = 选择「主生长方向」，snap 到 8 方向（N/NE/E/SE/S/SW/W/NW）
+- 方向键导航：Left/Right/Up/Down 在树结构内跳转选择，并通过 ReactFlow `setCenter` 跟随视口
+- LaTeX 渲染管道：`compile_via_latex`（`dot2tex → xelatex → pdf2svg`）+ `check_latex` 后端命令
+- SVG 预览头部增加 `DOT / LaTeX` 引擎切换；导出 PDF 自动走 LaTeX 管道
+
+### 变更
+- `MindMapNode` 移除 `position`，新增 `growthDirection?: Dir8`
+- `NodeStyle` 新增 `fontweight` / `fontstyle`；序列化时拼到 Graphviz `fontname`（如 `"Inter Bold"`）
+- ReactFlow 增加 `disableKeyboardA11y` 关闭默认箭头移动节点
+- 工具栏精简：Open/Save/Export/Check 按钮迁移到原生菜单
+- 移除 `dagre`、`@types/dagre` 依赖（自实现 R-T 布局，bundle -75KB）
+
+### 文档
+- 新增 `docs/latex-pipeline.md`：LaTeX 三件套依赖、数据流、命令签名、错误排查
+- `CHANGELOG` / `docs/plan.md` / `docs/SESSION_LOG.md` 同步更新
+
 ## [2026-05-06] — 交互画布升级
 
 ### 新增

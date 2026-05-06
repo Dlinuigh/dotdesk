@@ -7,13 +7,14 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type Edge,
   type OnSelectionChangeParams,
   type NodeChange,
 } from '@xyflow/react';
-import dagre from 'dagre';
 import type {
+  Dir8,
   DotStyleConfig,
   EdgeStyle,
   EdgeStyleMap,
@@ -22,6 +23,15 @@ import type {
   NodeStyle,
 } from '../types';
 import { MindMapNodeView, type MindMapNodeData } from './MindMapNodeView';
+import {
+  NODE_H,
+  NODE_W,
+  arrowKeyToNavTarget,
+  dirToCardinal,
+  layoutTree,
+  navigate,
+  snapToDir8,
+} from './layout';
 
 let _idCounter = 0;
 function genId(): string {
@@ -34,8 +44,35 @@ function createNode(label = 'New Node'): MindMapNode {
 
 /* ── DOT 序列化 ── */
 
+/**
+ * 把 fontweight/fontstyle 合并到 fontname 后，再返回纯 DOT 属性对象。
+ * Graphviz 的 fontname 会被传给底层字体子系统，"Inter Bold Italic" 在 Pango/cairo
+ * 后端通常能正确识别为粗斜体；fontweight/fontstyle 不是 Graphviz 标准属性，所以
+ * 不能直接输出，只能拼到 fontname。
+ */
+function normalizeFontAttrs(
+  raw: Record<string, unknown>,
+): Record<string, unknown> {
+  const obj = { ...raw };
+  const weight = obj.fontweight as 'normal' | 'bold' | undefined;
+  const styleAttr = obj.fontstyle as 'normal' | 'italic' | undefined;
+  delete obj.fontweight;
+  delete obj.fontstyle;
+
+  const baseName = (obj.fontname as string | undefined) || '';
+  const tokens: string[] = [];
+  if (baseName) tokens.push(baseName);
+  if (weight === 'bold') tokens.push('Bold');
+  if (styleAttr === 'italic') tokens.push('Italic');
+  if (tokens.length > 0) {
+    obj.fontname = tokens.join(' ');
+  }
+  return obj;
+}
+
 function styleToAttr(obj: Record<string, unknown>): string {
-  return Object.entries(obj)
+  const normalized = normalizeFontAttrs(obj);
+  return Object.entries(normalized)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => {
       const val = typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v);
@@ -47,7 +84,10 @@ function styleToAttr(obj: Record<string, unknown>): string {
 
 function inlineStyleToAttr(style: Partial<NodeStyle> | Partial<EdgeStyle> | undefined): string {
   if (!style) return '';
-  const entries = Object.entries(style).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  const normalized = normalizeFontAttrs(style as Record<string, unknown>);
+  const entries = Object.entries(normalized).filter(
+    ([, v]) => v !== undefined && v !== null && v !== '',
+  );
   if (entries.length === 0) return '';
   return entries
     .map(([k, v]) => {
@@ -121,22 +161,11 @@ function findParent(root: MindMapNode, id: string): MindMapNode | null {
   return null;
 }
 
-function flatNodes(root: MindMapNode): MindMapNode[] {
-  const out: MindMapNode[] = [];
-  function walk(n: MindMapNode) {
-    out.push(n);
-    for (const c of n.children) walk(c);
-  }
-  walk(root);
-  return out;
-}
-
-/** 写入指定节点的 position（返回新树） */
-function setNodePosition(root: MindMapNode, id: string, pos: { x: number; y: number }): MindMapNode {
-  const cloned = structuredClone(root);
-  const target = findNode(cloned, id);
-  if (target) target.position = pos;
-  return cloned;
+/** 在 ReactFlow 节点数组中查找指定 id 的中心点（左上角 + 半个尺寸） */
+function findRfCenter(rfNodes: Node<MindMapNodeData>[], id: string) {
+  const n = rfNodes.find((x) => x.id === id);
+  if (!n) return null;
+  return { x: n.position.x + NODE_W / 2, y: n.position.y + NODE_H / 2 };
 }
 
 /** 移除指定节点（包括子树） */
@@ -149,33 +178,6 @@ function removeNodeFromTree(root: MindMapNode, ids: string[]): MindMapNode {
   }
   prune(cloned);
   return cloned;
-}
-
-/* ── dagre 布局 ── */
-
-const NODE_W = 160;
-const NODE_H = 44;
-
-function computeMissingLayout(
-  rfNodes: Node<MindMapNodeData>[],
-  rfEdges: Edge[],
-  rankdir: GraphStyle['rankdir'] = 'LR',
-): Node<MindMapNodeData>[] {
-  const allHave = rfNodes.every((n) => n.position && (n.position.x !== 0 || n.position.y !== 0));
-  if (allHave) return rfNodes;
-
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: rankdir || 'LR', nodesep: 40, ranksep: 100 });
-  g.setDefaultEdgeLabel(() => ({}));
-  rfNodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
-  rfEdges.forEach((e) => g.setEdge(e.source, e.target));
-  dagre.layout(g);
-
-  return rfNodes.map((n) => {
-    if (n.position && (n.position.x !== 0 || n.position.y !== 0)) return n;
-    const laid = g.node(n.id);
-    return { ...n, position: { x: laid.x - NODE_W / 2, y: laid.y - NODE_H / 2 } };
-  });
 }
 
 /* ── 树 ↔ ReactFlow ── */
@@ -200,11 +202,16 @@ function treeToFlow(
   const rfNodes: Node<MindMapNodeData>[] = [];
   const rfEdges: Edge[] = [];
 
+  // R-T 自动布局：返回每个节点的中心坐标
+  const positions = layoutTree(root);
+
   function walk(node: MindMapNode) {
+    const center = positions.get(node.id) ?? { x: 0, y: 0 };
     rfNodes.push({
       id: node.id,
       type: 'mindNode',
-      position: node.position ?? { x: 0, y: 0 },
+      // ReactFlow 用左上角坐标；把中心点转换过去
+      position: { x: center.x - NODE_W / 2, y: center.y - NODE_H / 2 },
       data: {
         label: node.label,
         style: node.style,
@@ -260,8 +267,13 @@ function MindMapInner({
   onDotChange,
   onSelectionChange,
 }: MindMapProps) {
-  const rankdir = globalStyle?.graph?.rankdir ?? 'LR';
+  // 主轴方向由 root.growthDirection 决定（snap 后），rankdir 仅为兼容属性
+  const cardinal = dirToCardinal(root.growthDirection);
+  const rankdir: GraphStyle['rankdir'] =
+    cardinal === 'E' ? 'LR' : cardinal === 'W' ? 'RL' : cardinal === 'S' ? 'TB' : 'BT';
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const reactFlow = useReactFlow();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
@@ -277,7 +289,7 @@ function MindMapInner({
     [root, onChange],
   );
 
-  // 树 → RF 数据（每次 root/style 变化重新计算）
+  // 树 → RF 数据（每次 root/style 变化重新计算并跑布局）
   const flowData = useMemo(
     () =>
       treeToFlow(root, edgeStyles, globalStyle?.edge, {
@@ -290,25 +302,11 @@ function MindMapInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindMapNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  // 同步 RF 状态：root 结构变化或样式变化时重建 nodes/edges
+  // 同步 RF 状态：root/边样式变化时重新跑布局并刷新 RF nodes/edges
   useEffect(() => {
-    const positioned = computeMissingLayout(flowData.rfNodes, flowData.rfEdges, rankdir);
-    setNodes(positioned);
+    setNodes(flowData.rfNodes);
     setEdges(flowData.rfEdges);
-
-    // 如果有节点没有位置（首次布局），把布局结果写回 tree
-    const treeAllHavePositions = flatNodes(root).every(
-      (n) => n.position && (n.position.x !== 0 || n.position.y !== 0),
-    );
-    if (!treeAllHavePositions) {
-      const cloned = structuredClone(root);
-      for (const n of positioned) {
-        const target = findNode(cloned, n.id);
-        if (target) target.position = n.position;
-      }
-      onChange(cloned);
-    }
-  }, [flowData, rankdir, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flowData, setNodes, setEdges]);
 
   // 通知 DOT 变化
   useEffect(() => {
@@ -328,35 +326,64 @@ function MindMapInner({
     [onSelectionChange],
   );
 
-  // 节点拖动结束：写入 position 到 tree
+  /**
+   * 节点拖动结束：根据拖动后位置相对父节点的方向，snap 到 8 方向。
+   * - 拖动根节点：直接修改 root.growthDirection
+   * - 拖动子节点：把方向写入子节点 growthDirection（仅作为该子树主方向；
+   *   当前 layoutTree 仅看 root，所以子节点方向暂不影响布局，但保留以便后续扩展）
+   * 无论如何，拖动不写回坐标——下一次渲染会回到布局位置。
+   */
   const onNodeDragStop = useCallback(
     (_e: React.MouseEvent, node: Node) => {
-      const updated = setNodePosition(root, node.id, node.position);
-      onChange(updated);
+      // 找到父节点（如果是 root 就和自身比较——此时用屏幕中心作参考）
+      const parent = findParent(root, node.id);
+      const referenceCenter = parent ? findRfCenter(flowData.rfNodes, parent.id) : null;
+      const myCenter = {
+        x: node.position.x + NODE_W / 2,
+        y: node.position.y + NODE_H / 2,
+      };
+
+      let dx = 0;
+      let dy = 0;
+      if (referenceCenter) {
+        dx = myCenter.x - referenceCenter.x;
+        dy = myCenter.y - referenceCenter.y;
+      } else {
+        // 拖动 root：以拖动距离为参考（把 root 当作从原 root.position 移动）
+        const original = findRfCenter(flowData.rfNodes, node.id);
+        if (!original) {
+          setNodes(flowData.rfNodes); // 还原
+          return;
+        }
+        dx = myCenter.x - original.x;
+        dy = myCenter.y - original.y;
+      }
+
+      const threshold = 20;
+      if (Math.hypot(dx, dy) < threshold) {
+        setNodes(flowData.rfNodes); // 微小拖动，回到原位
+        return;
+      }
+
+      const dir: Dir8 = snapToDir8(dx, dy);
+      const cloned = structuredClone(root);
+      if (parent === null) {
+        cloned.growthDirection = dir;
+      } else {
+        const target = findNode(cloned, node.id);
+        if (target) target.growthDirection = dir;
+      }
+      onChange(cloned);
     },
-    [root, onChange],
+    [root, flowData.rfNodes, setNodes, onChange],
   );
 
-  // 节点变化（捕获多选拖动）
+  // 节点变化：保持 RF 内部 dragging 状态，但不写回坐标到 tree
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node<MindMapNodeData>>[]) => {
       onNodesChange(changes);
-      // 多选拖动时，position 类型变化的 dragging=false 表示拖动结束
-      const dragEnded = changes.filter(
-        (c) => c.type === 'position' && (c as { dragging?: boolean }).dragging === false,
-      );
-      if (dragEnded.length > 1) {
-        let updated = root;
-        for (const ch of dragEnded) {
-          const change = ch as { id: string; position?: { x: number; y: number } };
-          if (change.position) {
-            updated = setNodePosition(updated, change.id, change.position);
-          }
-        }
-        if (updated !== root) onChange(updated);
-      }
     },
-    [onNodesChange, root, onChange],
+    [onNodesChange],
   );
 
   /* ── 编辑操作 ── */
@@ -367,20 +394,11 @@ function MindMapInner({
     const targetNode = findNode(cloned, target);
     if (!targetNode) return;
     const child = createNode();
-    // 位置：偏移自父节点
-    if (targetNode.position) {
-      const offsetX = rankdir === 'LR' ? 220 : 0;
-      const offsetY = rankdir === 'LR' ? targetNode.children.length * 60 : 100;
-      child.position = {
-        x: targetNode.position.x + offsetX,
-        y: targetNode.position.y + offsetY,
-      };
-    }
     targetNode.children.push(child);
     onChange(cloned);
     setActiveId(child.id);
     setSelectedNodeIds([child.id]);
-  }, [activeId, root, rankdir, onChange]);
+  }, [activeId, root, onChange]);
 
   const addSibling = useCallback(() => {
     if (!activeId || activeId === root.id) {
@@ -392,18 +410,11 @@ function MindMapInner({
     if (!parent) return;
     const idx = parent.children.findIndex((c) => c.id === activeId);
     const sibling = createNode();
-    const refNode = parent.children[idx];
-    if (refNode.position) {
-      sibling.position = {
-        x: refNode.position.x,
-        y: refNode.position.y + (rankdir === 'LR' ? 60 : 100),
-      };
-    }
     parent.children.splice(idx + 1, 0, sibling);
     onChange(cloned);
     setActiveId(sibling.id);
     setSelectedNodeIds([sibling.id]);
-  }, [activeId, root, rankdir, addChild, onChange]);
+  }, [activeId, root, addChild, onChange]);
 
   const deleteSelected = useCallback(() => {
     const toRemove = selectedNodeIds.filter((id) => id !== root.id);
@@ -414,11 +425,28 @@ function MindMapInner({
     setActiveId(null);
   }, [selectedNodeIds, root, onChange]);
 
+  /** 方向键导航：在树结构内部移动选择 */
+  const navigateBy = useCallback(
+    (key: string) => {
+      if (!activeId) return;
+      const navTarget = arrowKeyToNavTarget(key, cardinal);
+      if (!navTarget) return;
+      const next = navigate(root, activeId, navTarget);
+      if (!next) return;
+      setActiveId(next);
+      setSelectedNodeIds([next]);
+      onSelectionChange?.([next], selectedEdgeIds);
+      // 把视口跟到新节点
+      const center = findRfCenter(flowData.rfNodes, next);
+      if (center) reactFlow.setCenter(center.x, center.y, { duration: 200, zoom: undefined });
+    },
+    [activeId, cardinal, root, selectedEdgeIds, onSelectionChange, flowData.rfNodes, reactFlow],
+  );
+
   /* ── 键盘事件 ── */
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // 正在编辑 input 时不拦截
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
@@ -431,9 +459,18 @@ function MindMapInner({
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         deleteSelected();
+      } else if (
+        e.key === 'ArrowUp' ||
+        e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' ||
+        e.key === 'ArrowRight'
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigateBy(e.key);
       }
     },
-    [addChild, addSibling, deleteSelected],
+    [addChild, addSibling, deleteSelected, navigateBy],
   );
 
   return (
@@ -447,7 +484,7 @@ function MindMapInner({
       <div className="panel-header">
         <span>Mind Map</span>
         <span style={{ fontSize: '0.75rem', color: '#93a4c7' }}>
-          Tab:子节点 · Enter:兄弟节点 · Del:删除 · Ctrl/⌘+Click:多选 · Shift+拖拽:框选 · 双击:编辑
+          Tab:子节点 · Enter:兄弟节点 · Del:删除 · ←↑↓→:导航 · 拖动:改方向 · 双击:编辑 · Ctrl+Click:多选
         </span>
       </div>
       <div className="mindmap-canvas">
@@ -465,6 +502,7 @@ function MindMapInner({
           multiSelectionKeyCode={['Control', 'Meta']}
           selectionKeyCode="Shift"
           deleteKeyCode={null}
+          disableKeyboardA11y
           fitView
           fitViewOptions={{ padding: 0.2 }}
           proOptions={{ hideAttribution: true }}

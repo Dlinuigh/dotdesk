@@ -73,6 +73,89 @@ button:disabled {
   gap: 0.5rem;
 }
 
+.panel-toggle-group {
+  display: inline-flex;
+  margin-left: 0.5rem;
+  border: 1px solid #34415f;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.icon-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #34415f;
+  color: #93a4c7;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.panel-toggle-group .icon-toggle:last-child {
+  border-right: none;
+}
+
+.icon-toggle:hover:not(:disabled) {
+  background: #1a2540;
+  color: #ecf2ff;
+}
+
+.icon-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-toggle--on {
+  background: #5b7cfa;
+  color: #fff;
+}
+
+.icon-toggle--on:hover:not(:disabled) {
+  background: #6f8dff;
+  color: #fff;
+}
+
+.engine-switch {
+  display: inline-flex;
+  border: 1px solid #34415f;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 24px;
+}
+
+.engine-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-right: 1px solid #34415f;
+  color: #93a4c7;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0 0.6rem;
+}
+
+.engine-switch .engine-btn:last-child {
+  border-right: none;
+}
+
+.engine-btn:hover {
+  background: #1a2540;
+  color: #ecf2ff;
+}
+
+.engine-btn--on,
+.engine-btn--on:hover {
+  background: #5b7cfa;
+  color: #fff;
+}
+
 /* ── Workspace ── */
 
 .workspace {
@@ -84,6 +167,14 @@ button:disabled {
 
 .workspace--with-sidebar {
   grid-template-columns: 280px minmax(360px, 1fr) minmax(420px, 1fr);
+}
+
+.workspace--no-preview {
+  grid-template-columns: 1fr;
+}
+
+.workspace--with-sidebar.workspace--no-preview {
+  grid-template-columns: 280px minmax(360px, 1fr);
 }
 
 .panel,
@@ -535,4 +626,38 @@ input[type="number"].style-input::-webkit-outer-spin-button {
   height: 14px;
   accent-color: #6f8dff;
   cursor: pointer;
+}
+
+/* font-style toggle buttons (B / I) */
+
+.style-toggle-group {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.style-toggle {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #141b2b;
+  border: 1px solid #34415f;
+  color: #b9c7e6;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: serif;
+}
+
+.style-toggle:hover {
+  border-color: #6f8dff;
+  color: #ecf2ff;
+}
+
+.style-toggle--on {
+  background: #5b7cfa;
+  border-color: #5b7cfa;
+  color: #fff;
 }

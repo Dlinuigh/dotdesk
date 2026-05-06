@@ -4,6 +4,46 @@
 
 ---
 
+## [0005] 2026-05-06 — 画布 UX 优化（菜单 / 树状布局 / 字体 / LaTeX）
+
+### 对话摘要
+第五回合对话覆盖五项交叉改进：
+
+1. **三面板独立隐藏**：App 增加 `panels` 状态，顶部 3 个 icon toggle，workspace grid 与 RenderLog 渲染按需折叠。
+2. **Tauri 原生菜单**：新建 `src-tauri/src/menu.rs`，构建 File/Edit/View/Render 子菜单。所有自定义项用 `MenuItem`（不用 `CheckMenuItem`），通过 `app.emit("menu", id)` 把事件 id 透传给前端；前端 `useEffect + listen` 订阅，按 id 分发到 `handlersRef`，避免重新挂载。
+3. **R-T 自动树状布局**：`MindMapNode` 移除 `position`，新增 `growthDirection: Dir8`；新建 `src/components/layout.ts`：后序计算每个子树在面宽轴上的占用宽度，前序按区间中心放置子节点；4 主轴一等公民，4 对角线 snap 到最近主轴；拖动节点 → 计算位移夹角 → snap → 重排整树。
+4. **方向键导航**：ReactFlow 加 `disableKeyboardA11y`；自定义 `handleKeyDown` 按当前 `cardinal` 方向把箭头键映射为 parent/child/prev-sibling/next-sibling；通过 `useReactFlow().setCenter` 跟随视口。
+5. **字体增强**：`NodeStyle` 增加 `fontweight` / `fontstyle`；`mindMapToDot` 把它们拼到 Graphviz `fontname`（如 `"Inter Bold Italic"`）；DotStylePanel Typography 区追加 FontFamily 下拉 + B/I toggle；默认 fontsize 14 → 18。
+6. **LaTeX 管道**：新建 `src-tauri/src/latex.rs` 与 `docs/latex-pipeline.md`。
+   - `check_latex`：探测 xelatex / dot2tex / pdf2svg
+   - `compile_via_latex`：`dot2tex --format=tikz --crop --codeonly` → `standalone` 模板 → `xelatex` → `pdf2svg`，可选导出 PDF
+   - SvgPreview 头部 segmented toggle（DOT / LaTeX），App `previewEngine` 状态联动 `renderDot` 选择命令；菜单 `Render → Engine: ...` / `Export PDF` 同样联动
+
+### 关键决策
+- **菜单不持有勾选状态**：`CheckMenuItem` 需要 Rust↔JS 双向同步，复杂度大；MVP 改为单向事件 + React 内部状态承担可见性来源。
+- **拖动只改方向**：节点位置完全由布局决定，避免计划中"自由位置"导致 edge 路径不规则的问题。微小拖动（< 20px）回弹，不改方向。
+- **对角线归并**：8 方向 snap 给用户清晰的语义，但布局算法只支持 4 主轴；NE/SE → E，NW/SW → W，N/S 保留。后续若需要真正的 8 方向独立布局再改。
+- **LaTeX 三件套**：用 `dot2tex` + `xelatex` + `pdf2svg`，而非 `dot2texi`（避开 LaTeX 端 `--shell-escape`）。临时目录复用 `${TMPDIR}/dotdesk-latex/`。
+- **bundle 瘦身**：移除 `dagre` + `@types/dagre`，自实现 R-T 后 JS bundle 从 489KB → 414KB。
+
+### 涉及文件
+- `package.json` — 移除 dagre 依赖
+- `src/types.ts` — `Dir8`、`MindMapNode.growthDirection`、`NodeStyle.fontweight/fontstyle`、默认 fontsize=18
+- `src/components/layout.ts`（新建） — R-T 布局 + 方向 snap + 树导航
+- `src/components/MindMap.tsx` — 重写布局集成 + 方向键导航 + 拖动改方向
+- `src/components/MindMapNodeView.tsx` — 应用 fontweight/fontstyle
+- `src/components/DotStylePanel.tsx` — FontFamily 下拉 + B/I toggle + `FONT_FAMILIES`
+- `src/components/SvgPreview.tsx` — 引擎切换 segmented toggle
+- `src/App.tsx` — `panels` 状态、`previewEngine` 状态、菜单事件订阅、面板 toggle、引擎联动渲染、`exportPdf` / `checkLatex` 入口
+- `src/styles.css` — `.icon-toggle` / `.engine-switch` / `.style-toggle-group` / workspace 变体
+- `src-tauri/src/menu.rs`（新建） — Tauri 菜单
+- `src-tauri/src/latex.rs`（新建） — `check_latex` / `compile_via_latex`
+- `src-tauri/src/lib.rs` — 注册菜单与新命令
+- `docs/latex-pipeline.md`（新建） — 依赖、数据流、错误排查
+- `CHANGELOG.md` / `docs/plan.md`（阶段六）
+
+---
+
 ## [0004] 2026-05-06 — 将实现归档至文档
 
 ### 对话摘要
