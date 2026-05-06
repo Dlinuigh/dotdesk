@@ -4,6 +4,21 @@
 
 ---
 
+## [0004] 2026-05-06 — 将实现归档至文档
+
+### 对话摘要
+将交互画布改造后的工作内容写入仓库文档，便于后续查阅：
+1. 新建 `docs/interactive-canvas.md`：数据流（Mermaid）、类型说明、文件职责表、ReactFlow 配置摘要、dagre 布局策略、`mindMapToDot` 与画布分工、已实现/未实现键盘项、后续扩展方向
+2. 更新 `docs/architecture.md`：模块边界增加 MindMap、DotStylePanel、App 状态职责，并链接 `interactive-canvas.md`
+3. 更新 `docs/plan.md`：阶段五增加归档文档引用
+4. 更新 `CHANGELOG.md`：增加「文档」小节记录上述变更
+5. 更新 `README.md`：项目结构树中列出 `docs/` 下主要文档
+
+### 关键决策
+- 计划中提到的 Space / 方向键导航若代码尚未实现，在 `interactive-canvas.md` 中明确标注为「当前未实现」，避免文档与行为不一致
+
+---
+
 ## [0003] 2026-05-06 — 交互画布升级（ReactFlow + dagre）
 
 ### 对话摘要
@@ -40,6 +55,7 @@
 - `src/App.tsx`（edgeStyles + selection 联动）
 - `src/styles.css`（ReactFlow 暗色主题）
 - `CHANGELOG.md`、`README.md`、`docs/plan.md`
+- 归档说明见 `docs/interactive-canvas.md`（本会话补充）
 
 ---
 

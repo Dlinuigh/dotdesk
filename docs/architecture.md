@@ -44,12 +44,16 @@ flowchart TD
 
 ## 模块边界
 
-- `src/App.tsx` 负责应用状态，并协调文件操作、Graphviz 检测、渲染和导出。
+- `src/App.tsx` 负责应用状态，并协调文件操作、Graphviz 检测、渲染和导出；思维导图模式下持有 `mindMapRoot`、`dotStyle`、`edgeStyles` 及节点/边选中集合，驱动 `mindMapToDot` 与预览。
 - `src/components/DotEditor.tsx` 封装 Monaco，提供受控编辑器接口。
+- `src/components/MindMap.tsx` + `MindMapNodeView.tsx`：ReactFlow 画布（拖动、多选、边选中、dagre 初布局）；`mindMapToDot` 从此模块导出。
+- `src/components/DotStylePanel.tsx`：DOT 样式边栏，按画布选中上下文切换 Graph/Node/Edge 区块。
 - `src/components/SvgPreview.tsx` 渲染 SVG 预览区域。
 - `src/components/RenderLog.tsx` 展示 Graphviz 状态和渲染输出。
 - `src-tauri/src/graphviz.rs` 负责所有与 `dot` 二进制命令的直接交互。
 - `src-tauri/src/lib.rs` 注册插件和 Tauri commands。
+
+交互画布实现细节见 `docs/interactive-canvas.md`。
 
 ## 本地命令
 

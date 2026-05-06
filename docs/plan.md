@@ -47,6 +47,8 @@
 
 ## 阶段五：交互画布升级 ✅
 
+实现说明与数据流归档：`docs/interactive-canvas.md`。
+
 - [x] 引入 `@xyflow/react` + `dagre` 依赖
 - [x] `MindMapNode` 增加 `position` 字段
 - [x] `EdgeStyleMap` 类型：按 `"src->tgt"` 存储边样式

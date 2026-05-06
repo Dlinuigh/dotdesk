@@ -22,6 +22,10 @@
 - `DotStylePanel` props 重构：拆分 node/edge 选中处理回调
 - 新增 `@xyflow/react`、`dagre` 依赖
 
+### 文档
+- 新增 `docs/interactive-canvas.md`，归档交互画布数据流、类型、文件职责与键盘行为
+- `docs/architecture.md` 补充 MindMap / DotStylePanel 模块说明并链接上述文档
+
 ## [2026-05-06]
 
 ### 新增

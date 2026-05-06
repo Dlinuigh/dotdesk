@@ -125,6 +125,10 @@ dotdesk/
 │   │   └── graphviz.rs     # Graphviz 检测和渲染命令
 │   └── Cargo.toml
 ├── docs/                   # 项目文档
+│   ├── architecture.md
+│   ├── interactive-canvas.md   # 交互画布（ReactFlow）实现说明
+│   ├── plan.md
+│   └── SESSION_LOG.md
 ├── .github/skills/         # VS Code Agent Skills
 └── package.json
 ```
